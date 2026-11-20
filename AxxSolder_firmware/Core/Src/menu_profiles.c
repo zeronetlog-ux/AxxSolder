@@ -268,9 +268,9 @@ static void edit_name(char *name, uint8_t maxlen)
 
     /* Hints (static ??? drawn once) */
     LCD_PutStr(5, 265, "SW1:next  SW2:<  SW3:del",
-               FONT_arial_16X18, C_Footer, bg);
+               FONT_arial_12X15, C_Footer, bg);
     LCD_PutStr(5, 288, "Hold SW1 to confirm",
-               FONT_arial_16X18, C_Footer, bg);
+               FONT_arial_12X15, C_Footer, bg);
 
     draw_name_row(name, cursor, maxlen);
 
