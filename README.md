@@ -128,6 +128,10 @@ hardware needed, same idea as `tools/fs_test`.
 - `stusb_nvm_read()` reads the controller's own NVM settings (5 x 8 bytes) - that
   is the profile it negotiates from before the firmware runs.
 
+The Arduino driver this port was based on is vendored unmodified under
+`AxxSolder_firmware/STUSB400-arduino/` (MIT, by ardnew) purely as a reference for
+the register sequences; nothing in the firmware build uses it.
+
 # Features
 - The tip temperature is set by a rotary encoder. Pressing the encoder puts AxxSolder into Sleep mode and heating is turned off, press again to wake up.  
 - AxxSolder is capable of driving C115, C210 and C245 style cartridges from JBC. With two handle sense inputs AxxSolder can determine if the connected handle is either a NT115, T210 or T245 and adjust max output power accordingly. The max output power is software limited to 130 W for T245, 65 W for T210 and 22 W for NT115 handles.
