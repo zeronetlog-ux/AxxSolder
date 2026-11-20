@@ -123,18 +123,12 @@ static uint8_t discover_offers(void){
 
 	count = 0;
 	if (PD_CAPS_ATTEMPTS > 0u) {
-		/* Park the link at 5 V before touching the source. The chip re-requests
-		 * its own NVM profile on every soft reset, so if that profile is 15/20 V
-		 * the supply would be bounced between voltages while the capabilities are
-		 * read - and a fallback below would end up on that high-voltage contract.
-		 * With the sink PDO count at 1 the chip can only ask for PDO1 (5 V),
-		 * which every source accepts. A laptop port acting as the source is known
-		 * to dislike that bouncing.
-		 *
-		 * With PD_CAPS_ATTEMPTS = 0 (build option PD_QUIET_BOOT) the link is not
-		 * touched at all: no soft reset, no request - the chip simply keeps the
-		 * contract it negotiated from its own NVM. */
-		(void)stusb_set_valid_pdo(1);
+		/* The capabilities are captured without touching the sink PDOs: the soft
+		 * reset makes the chip re-request the profile it already negotiated, so
+		 * VBUS stays where it is and the list arrives without a voltage jump. The
+		 * 5 V case never gets here (see PD_RENEGOTIATE_MIN_V), so the park-at-5 V
+		 * step that used to sit here only caused a 20 -> 5 -> 20 V dip on a real
+		 * PD supply. */
 		count = stusb_read_source_pdos(source, STUSB_SRC_PDO_MAX,
 		                               PD_CAPS_TRY_MS, PD_CAPS_ATTEMPTS);
 	}

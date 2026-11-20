@@ -369,6 +369,11 @@ int main(void)
 					? -1.0f
 					: ((float)pd_offers[(uint8_t)chosen].mv / 1000.0f);
 				settings_save();
+
+				/* The new contract changes the power the source can deliver, so
+				 * the heater limit has to be recomputed - otherwise the station
+				 * keeps running (and reporting) the limit of the previous mode. */
+				handle_apply_settings();
 			}
 		}
 
