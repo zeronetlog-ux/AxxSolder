@@ -33,6 +33,7 @@ extern uint8_t stusb_chip_id;
 #define VAL_PRT_STATUS_AL          0x02
 #define VAL_MSG_RECEIVED           0x04
 #define VAL_SOURCE_CAPABILITIES    0x01
+#define VAL_GET_SRC_CAP            0x07   /* PD control-message type: Get_Source_Cap */
 #define VAL_PE_SNK_READY 0x18
 #define VAL_SNK_ATT 0xE0
 
@@ -129,5 +130,10 @@ bool poll_source();
 HAL_StatusTypeDef stusb_read_rdo(STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *Nego_RDO);
 HAL_StatusTypeDef stusb_update_pdo(uint8_t pdo_number, uint16_t voltage_mv, uint16_t current_ma);
 HAL_StatusTypeDef stusb_set_valid_pdo(uint8_t valid_count);
+
+/* NOTE: the source's PDO list cannot be read from this chip - the received
+ * Source_Capabilities is not exposed over I2C (RX buffer reads back empty,
+ * Get_Source_Cap is not answered). The available supply profiles are found by
+ * probing instead, see pd_offers[] in power_source.h. */
 
 #endif

@@ -351,12 +351,35 @@ int main(void)
 	/* check STUSB4500 */
 	power_source_init();
 
+	/* Boot-time USB-PD mode chooser: lists the modes discovered on the source
+	 * and lets the user pick one with the encoder (only a button press
+	 * confirms). A choice other than the most powerful mode is stored in flash
+	 * as the preferred voltage, so the next start negotiates it right away;
+	 * picking the topmost entry keeps the selection automatic. */
+	if ((power_source == POWER_USB) && (pd_offer_count > 0)){
+		int8_t chosen = LCD_run_pd_banner();
+
+		buttons_clear_all();               /* the tap only ends the chooser */
+
+		if ((chosen >= 0) && ((uint8_t)chosen != pd_offer_selected)){
+			if (power_source_apply_offer((uint8_t)chosen)){
+				/* Remember the chosen voltage (0 .. 21 V); picking the most
+				 * powerful entry keeps the selection automatic. */
+				flash_values.pd_profile = (chosen == 0)
+					? -1.0f
+					: ((float)pd_offers[(uint8_t)chosen].mv / 1000.0f);
+				settings_save();
+			}
+		}
+
+		UG_FillScreen(C_Background);
+	}
+
 	/* Draw the main screen decoration */
 	if (flash_values.display_graph == 0){
 		LCD_draw_main_screen();
 	}
 	else{
-		//UG_FillScreen(background);
 		draw_graph_init();
 	}
 	HAL_Delay(250);

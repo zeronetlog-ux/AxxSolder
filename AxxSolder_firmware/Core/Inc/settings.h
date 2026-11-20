@@ -50,6 +50,9 @@ typedef struct {
     float change_enc_dir;
     float encoder_step_idx;   /* index into encoder step table {1,2,5,10} */
     float heat_at_startup;    /* 1 = preheat to standby temp on power-on */
+    float pd_profile;         /* USB-PD: preferred supply voltage in volts
+                               * (e.g. 15 => prefer 15 V), -1 = automatic
+                               * (most powerful profile the source offers) */
 } Flash_values;
 
 /* The single live copy of user settings. Read directly from anywhere

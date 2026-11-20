@@ -14,6 +14,11 @@ uint16_t encoder_get_count(void);
 void     encoder_set_count(uint16_t value);
 void     encoder_add(int16_t delta);
 
+/* Detents turned since the previous call (0 when idle), direction already
+ * following the change_enc_dir setting. Used by UI loops that consume the knob
+ * directly (e.g. the boot-time USB-PD mode chooser). */
+int16_t  encoder_read_detents(void);
+
 /* ISR: called from HAL_TIM_IC_CaptureCallback when TIM2's input-capture
  * channel fires (one click of the rotary encoder). */
 void encoder_isr_capture(void);

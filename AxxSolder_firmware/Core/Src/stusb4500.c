@@ -169,5 +169,10 @@ HAL_StatusTypeDef stusb_soft_reset(){
 	return stusb_write_register(REG_PD_COMMAND_CTRL, cmd, 1);
 }
 
+/* NOTE: the STUSB4500 does not expose the source's Source_Capabilities over
+ * I2C - its PD message buffer reads back empty and a Get_Source_Cap request is
+ * never answered (upstream AxxSolder hit the same wall). The available supply
+ * profiles are therefore discovered by PROBING in power_source_init(). */
+
 //read USB-C connection status
 

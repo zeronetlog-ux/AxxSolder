@@ -6,6 +6,8 @@
 #include "handle.h"
 #include "heater.h"
 #include "power_source.h"
+#include "buttons.h"
+#include "encoder.h"
 #include "lcd.h"
 #include "gui.h"
 #include "graph.h"
@@ -452,6 +454,9 @@ static void update_display(void) {
 void LCD_draw_main_screen(void) {
     if ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) {
         UG_FillScreen(C_Background);
+        /* Opaque text: the partial updates below rely on it to wipe the
+         * previous glyphs (menus/banner may have left transparency set). */
+        UG_FontSetTransparency(0);
 
         LCD_PutStr(50, 8, "NONAME", FONT_arial_19X22, C_Header, C_Background);
         LCD_DrawLine(0, 36, 240, 36, C_Header);
@@ -513,6 +518,7 @@ void LCD_draw_main_screen(void) {
     }
     else {
         UG_FillScreen(C_Background);
+        UG_FontSetTransparency(0);
         LCD_PutStr(165, 10, "NONAME", FONT_arial_20X23, C_Header, C_Background);
 
         LCD_PutStr(64, 10, "Set temp", FONT_arial_20X23, C_Text, C_Background);
@@ -611,6 +617,206 @@ void LCD_draw_earth_fault_popup(void) {
     LCD_PutStr(20, 160, "AND REBOOT",  FONT_arial_20X23, C_Highlight, C_Text);
 
     Error_Handler();
+}
+
+/* ------------------------------------------------------------------ */
+/* USB-PD source banner (boot)                                        */
+/* ------------------------------------------------------------------ */
+
+/* ---- USB-PD probe status (boot) ---- */
+
+#define PD_PROBE_ROW_H 16
+
+/* First row of the per-voltage list, per orientation. */
+static uint16_t pd_probe_first_row_y(void)
+{
+    return (uint16_t)(((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 42 : 38);
+}
+
+/* Bottom hint line, per orientation. */
+static uint16_t pd_probe_hint_y(void)
+{
+    return (uint16_t)(((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 292 : 212);
+}
+
+/* Draw the probe screen: header plus one "..V  ..." row per voltage. */
+void LCD_show_pd_probe_start(const uint16_t *voltages_mv, uint8_t count)
+{
+    char     line[24];
+    uint16_t y = pd_probe_first_row_y();
+
+    UG_FillScreen(C_Background);
+    UG_FontSetTransparency(0);
+
+    LCD_PutStr(8, 8, "USB-PD PROBE", FONT_arial_17X18, C_Header, C_Background);
+
+    for (uint8_t i = 0; i < count; i++) {
+        (void)snprintf(line, sizeof(line), "%2uV  ...", (unsigned)(voltages_mv[i] / 1000u));
+        LCD_PutStr(8, (uint16_t)(y + (i * PD_PROBE_ROW_H)), line, FONT_arial_12X15, C_Footer, C_Background);
+    }
+
+    LCD_PutStr(8, pd_probe_hint_y(), "asking the charger...", FONT_arial_12X15, C_Footer, C_Background);
+}
+
+/* Fill in one row: the discovered mode, or "none" when the source has no PDO at
+ * that voltage. */
+void LCD_show_pd_probe_result(uint8_t row, uint16_t mv, uint16_t ma)
+{
+    char     line[24];
+    uint16_t y = (uint16_t)(pd_probe_first_row_y() + (row * PD_PROBE_ROW_H));
+
+    if (ma == 0u) {
+        (void)snprintf(line, sizeof(line), "%2uV  none", (unsigned)(mv / 1000u));
+        LCD_PutStr(8, y, line, FONT_arial_12X15, C_Warning, C_Background);
+        return;
+    }
+
+    (void)snprintf(line, sizeof(line), "%2uV  %u.%02uA %3uW",
+                   (unsigned)(mv / 1000u),
+                   (unsigned)(ma / 1000u), (unsigned)((ma % 1000u) / 10u),
+                   (unsigned)((((uint32_t)mv * ma) + 500000u) / 1000000u));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+}
+
+/* Live feedback while a voltage/current combination is being requested. */
+void LCD_show_pd_probe_trying(uint16_t mv, uint16_t ma)
+{
+    char line[24];
+
+    (void)snprintf(line, sizeof(line), "trying %2u.%uV %u.%02uA",
+                   (unsigned)(mv / 1000u), (unsigned)((mv % 1000u) / 100u),
+                   (unsigned)(ma / 1000u), (unsigned)((ma % 1000u) / 10u));
+    LCD_PutStr(8, pd_probe_hint_y(), line, FONT_arial_12X15, C_Header, C_Background);
+}
+
+/* ---- USB-PD boot banner / mode chooser ---- */
+
+/* First text line of the list, per orientation. */
+static uint16_t pd_banner_list_y(void)
+{
+    return (uint16_t)(((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 40 : 36);
+}
+
+/* Draw one entry of the accepted-profile list; `pos` is its position in the
+ * list, `active` marks the cursor. Only two of these are redrawn when the user
+ * turns the knob, which keeps the display from flickering. */
+static void draw_pd_banner_line(const uint8_t *list, uint8_t pos, uint8_t active)
+{
+    const pd_offer_t *o = &pd_offers[list[pos]];
+    uint32_t watts = (((uint32_t)o->mv * o->ma) + 500000u) / 1000000u;
+    char     line[32];
+
+    (void)snprintf(line, sizeof(line), "%c %2u.%uV %u.%02uA %3uW",
+                   active ? '>' : ' ',
+                   (unsigned)(o->mv / 1000u), (unsigned)((o->mv % 1000u) / 100u),
+                   (unsigned)(o->ma / 1000u), (unsigned)((o->ma % 1000u) / 10u),
+                   (unsigned)watts);
+
+    LCD_PutStr(8, (uint16_t)(pd_banner_list_y() + (pos * 16u)), line, FONT_arial_12X15,
+               active ? C_Header : C_Text, C_Background);
+}
+
+/* Draw the whole chooser. `list` holds the pd_offers[] indices of the accepted
+ * profiles, `sel` is the cursor position inside that list. */
+static void draw_pd_banner_body(const uint8_t *list, uint8_t count, uint8_t sel)
+{
+    uint16_t y = pd_banner_list_y();
+    uint8_t  portrait = (uint8_t)((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2));
+
+    UG_FillScreen(C_Background);
+
+    LCD_PutStr(8, 8, "USB-PD SOURCE", FONT_arial_17X18, C_Header, C_Background);
+
+    if (count == 0u) {
+        LCD_PutStr(8, y, "no mode accepted", FONT_arial_12X15, C_Warning, C_Background);
+        LCD_PutStr(8, (uint16_t)(y + 16), "(5 V only source)", FONT_arial_12X15, C_Footer, C_Background);
+    }
+
+    for (uint8_t i = 0; i < count; i++) {
+        draw_pd_banner_line(list, i, (uint8_t)(i == sel));
+    }
+
+    /* Bottom hint bar: knob selects, any button confirms. */
+    LCD_PutStr(8, (uint16_t)(portrait ? 292 : 212), "turn=select  press=OK",
+               FONT_arial_12X15, C_Footer, C_Background);
+}
+
+/* Boot-time USB-PD mode chooser.
+ *
+ * Shows the profiles the source accepted (probed by power_source_init()) and
+ * lets the user pick one with the rotary encoder; any button confirms. Returns
+ * the index into pd_offers[] that should be used, or -1 when the source
+ * accepted nothing. The banner also closes on its own after
+ * PD_BANNER_TIMEOUT_MS without any interaction, keeping the highlighted
+ * profile. */
+int8_t LCD_run_pd_banner(void)
+{
+    uint8_t list[PD_OFFER_MAX];
+    uint8_t count = 0;
+    uint8_t sel   = 0;
+    int8_t  initial = (pd_offer_selected == PD_OFFER_NONE) ? -1 : (int8_t)pd_offer_selected;
+
+    /* Collect the accepted profiles, highest power first. */
+    for (uint8_t i = 0; i < pd_offer_count; i++) {
+        if (!pd_offers[i].accepted) {
+            continue;
+        }
+        if (i == pd_offer_selected) {
+            sel = count;                 /* start on the profile in use */
+        }
+        list[count++] = i;
+    }
+
+    /* Opaque text: the main screen relies on transparency 0 to wipe glyphs. */
+    uint8_t transparency = UG_FontGetTransparency();
+    UG_FontSetTransparency(0);
+
+    (void)encoder_read_detents();        /* sync, drop stale movement */
+    draw_pd_banner_body(list, count, sel);
+
+    uint32_t last_activity = HAL_GetTick();
+    bool     confirmed     = false;
+
+    for (;;) {
+        /* In 3-button mode TIM2->CNT *is* the set temperature (driven by the
+         * preset buttons), so there is no knob to read. */
+        int16_t detents = (flash_values.three_button_mode == 1) ? 0 : encoder_read_detents();
+
+        /* Turning the knob only MOVES the cursor - it never selects anything. */
+        if ((detents != 0) && (count > 1u)) {
+            int16_t next = (int16_t)sel + detents;
+            if (next < 0) { next = 0; }
+            if (next > (int16_t)(count - 1u)) { next = (int16_t)(count - 1u); }
+            if ((uint8_t)next != sel) {
+                uint8_t previous = sel;
+                sel = (uint8_t)next;
+                draw_pd_banner_line(list, previous, 0);
+                draw_pd_banner_line(list, sel, 1);
+            }
+            last_activity = HAL_GetTick();
+        }
+
+        /* Only a button press confirms the highlighted mode. */
+        if (buttons_take_press(BTN_1) || buttons_take_press(BTN_2) ||
+            buttons_take_press(BTN_3)) {
+            confirmed = true;
+            break;
+        }
+
+        if ((HAL_GetTick() - last_activity) > PD_BANNER_TIMEOUT_MS) {
+            break;                       /* idle: keep the boot-time selection */
+        }
+
+        HAL_Delay(20);
+    }
+
+    UG_FontSetTransparency(transparency);
+
+    if (!confirmed) {
+        return initial;                  /* nothing pressed: do not change mode */
+    }
+
+    return (count > 0u) ? (int8_t)list[sel] : -1;
 }
 
 /* ------------------------------------------------------------------ */

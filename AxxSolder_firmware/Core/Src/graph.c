@@ -126,6 +126,12 @@ void draw_dashed_line_fillframe(int x1, int y1, int x2, int y2, uint16_t color,
 }
 
 void draw_graph_init(void) {
+	// Clear whatever was on screen before (boot banner, dismissed popup, ...)
+	UG_FillScreen(background);
+	// Opaque text: the plot labels are redrawn in place, they must wipe the
+	// previous glyphs (a menu or the PD banner may have left transparency set).
+	UG_FontSetTransparency(0);
+
 	// Background, grid, and labels are drawn once
 	UG_FillFrame(GRAPH_X0, GRAPH_Y0 - GRAPH_HEIGHT , GRAPH_X0 + GRAPH_WIDTH, GRAPH_Y0, background);
 

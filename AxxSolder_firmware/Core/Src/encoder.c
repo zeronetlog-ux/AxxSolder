@@ -76,6 +76,36 @@ void encoder_add(int16_t delta) {
     TIM2->CNT = (uint16_t)((int32_t)TIM2->CNT + delta);
 }
 
+/* Detents turned since the previous call, for UI code that polls the knob
+ * itself (the boot-time USB-PD mode chooser). The encoder emits 2 counts per
+ * detent; leftovers are kept so no movement is lost. */
+int16_t encoder_read_detents(void) {
+    static uint8_t  synced = 0;
+    static int32_t  enc_last = 0;
+    int32_t cnt = (int32_t)(uint16_t)TIM2->CNT;
+
+    if (!synced) {
+        enc_last = cnt;
+        synced   = 1;
+        return 0;
+    }
+
+    int32_t delta = cnt - enc_last;
+    if (delta >  32768) { delta -= 65536; }   /* 16-bit counter wrap */
+    if (delta < -32768) { delta += 65536; }
+
+    int32_t detents = delta / 2;
+    if ((detents > 20) || (detents < -20)) {
+        /* Implausible jump for a hand-turned knob: TIM2->CNT was repurposed
+         * elsewhere. Re-anchor instead of reporting it. */
+        enc_last = cnt;
+        return 0;
+    }
+
+    enc_last += detents * 2;                  /* keep the odd remainder */
+    return (int16_t)detents;
+}
+
 void encoder_isr_capture(void) {
     /* Click feedback for every encoder detent. */
     beep(flash_values.buzzer_enabled);

@@ -2,6 +2,7 @@
 #include "storage.h"
 #include "buzzer.h"
 #include "stm32g4xx_hal.h"
+#include <string.h>
 
 /* Struct to hold flash values */
 Flash_values flash_values;
@@ -46,7 +47,8 @@ Flash_values default_flash_values = {
     .show_profile_on_tip_change    = 0,
     .change_enc_dir                = 0,
     .encoder_step_idx              = 1,  /* index 1 -> step 2 */
-    .heat_at_startup               = 0
+    .heat_at_startup               = 0,
+    .pd_profile                    = -1  /* USB-PD: automatic (strongest) */
 };
 
 /* ------------------------------------------------------------------ */
@@ -56,6 +58,19 @@ Flash_values default_flash_values = {
 void settings_init(void){
 	// Check if user data in flash is valid, if not - write default parameters
 	if(!STORAGE_SETTINGS_DRIVER->verify(SETTINGS_PAGE, sizeof(Flash_values))){
+		/* Layout from an older firmware (one field shorter) still in flash?
+		 * Then keep the user's values - especially the temperature
+		 * calibration - and only append the new field's default. */
+		const uint16_t old_size = (uint16_t)(sizeof(Flash_values) - sizeof(float));
+
+		if(STORAGE_SETTINGS_DRIVER->verify(SETTINGS_PAGE, old_size)){
+			memcpy(&flash_values, &default_flash_values, sizeof(Flash_values));
+			if(STORAGE_SETTINGS_DRIVER->read(SETTINGS_PAGE, &flash_values, old_size) == STORE_OK){
+				settings_save();          /* upgrade the stored record */
+			}
+			return;
+		}
+
 		STORAGE_SETTINGS_DRIVER->write(SETTINGS_PAGE, &default_flash_values, sizeof(Flash_values));
 		beep(1); //Beep once to indicate default parameters written to flash
 		HAL_Delay(100);

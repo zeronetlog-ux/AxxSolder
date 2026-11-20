@@ -2,6 +2,8 @@
 #include "main.h"        /* sensor_values */
 #include "stusb4500.h"
 #include "sensors.h"     /* sensors_get_bus_voltage */
+#include "settings.h"    /* flash_values.pd_profile */
+#include "display_app.h" /* boot-time probe status screen */
 #include "debug.h"
 #include <stdbool.h>
 #include <math.h>        /* fabsf */
@@ -12,33 +14,32 @@
  * cable losses. Set to 1.0 = "trust the contract's number." */
 #define USB_PD_POWER_REDUCTION_FACTOR 1.0f
 
-/* Candidate sink profiles, requested HIGHEST POWER FIRST. We can't reliably
- * read the charger's advertised capabilities on this STUSB4500 (the PD message
- * buffer poll returns nothing here), so instead of guessing we PROBE: request
- * each profile in turn and let the charger accept or reject it. The STUSB4500
- * only forms a PDO2 contract if the source can supply that voltage AND current;
- * otherwise it falls back to PDO1 (5 V). We detect acceptance from the RDO
- * Object_Pos (the contracted SOURCE PDO index): == 1 is the 5 V fallback,
- * >= 2 means our profile matched. The first profile the charger accepts is
- * therefore the highest power it can deliver:
- *   20 V/5 A charger -> 100 W, 20 V/3 A -> 60 W, 15 V/3 A -> 45 W, 9 V/3 A -> 27 W.
- * The rungs are ordered by wattage (highest first) and include the 4.5 A and
- * 2.25 A ratings so a 90 W (20 V/4.5 A) or 45 W (20 V/2.25 A) charger is matched.
- * A 5 V-only source - or one that only offers high voltage below 3 A - accepts
- * none of these and we hold the safe 5 V baseline. A typical charger is matched
- * in the first 1-4 probes; the whole ladder is at most
- * 7 probes x PD_RENEGOTIATE_SETTLE_MS before the iron is ready. */
-typedef struct { uint16_t mv; uint16_t ma; } pd_profile_t;
-static const pd_profile_t pd_probe_ladder[] = {
-	{20000, 5000},   /* 100 W */
-	{20000, 4500},   /*  90 W */
-	{20000, 3000},   /*  60 W */
-	{20000, 2250},   /*  45 W  (20 V chargers without a 3 A rung) */
-	{15000, 3000},   /*  45 W  (15 V-max chargers) */
-	{12000, 3000},   /*  36 W */
-	{ 9000, 3000},   /*  27 W */
+/* USB-PD fixed-supply grid.
+ *
+ * The STUSB4500 cannot report the source's Source_Capabilities (its message
+ * buffer reads back empty and Get_Source_Cap is not answered), so the grid is
+ * DISCOVERED by asking: a PDO2 request is only turned into a contract when the
+ * source has a PDO at that voltage with at least that current, otherwise the
+ * link falls back to PDO1 (5 V) - which is visible in the RDO.
+ *
+ * PD 2.0 fixed PDOs may only use 5/9/12/15/20 V, so those are the voltages to
+ * probe (PDO1 = 5 V is always there and is our fallback). For every voltage the
+ * maximum accepted current is searched: acceptance is monotonic in current (a
+ * source either has a PDO at that voltage and accepts any current up to its
+ * rating, or rejects everything), so the full rating is tried first, then the
+ * smallest current to detect "no PDO at this voltage", then a binary search.
+ *
+ * The candidate currents are the values real PDO tables use (P/V for the usual
+ * 27/36/40/45/60/65/87/90/100 W supplies), so e.g. 15 V/2.66 A or 20 V/2 A are
+ * resolved exactly instead of being rounded to a 3 A rung. */
+static const uint16_t pd_probe_voltages_mv[] = { 20000, 15000, 12000, 9000 };
+#define PD_VOLTAGE_COUNT (sizeof(pd_probe_voltages_mv)/sizeof(pd_probe_voltages_mv[0]))
+
+static const uint16_t pd_probe_currents_ma[] = {
+	5000, 4500, 4000, 3500, 3250, 3000, 2750, 2660, 2500, 2250, 2220,
+	2000, 1750, 1670, 1500, 1250, 1000,  900,  750,  700,  500
 };
-#define PD_PROBE_COUNT (sizeof(pd_probe_ladder)/sizeof(pd_probe_ladder[0]))
+#define PD_CURRENT_COUNT (sizeof(pd_probe_currents_ma)/sizeof(pd_probe_currents_ma[0]))
 
 /* Time to let a renegotiation settle before reading the RDO to learn whether
  * the requested PDO2 was accepted. */
@@ -48,6 +49,11 @@ static const pd_profile_t pd_probe_ladder[] = {
 power_source_t power_source = POWER_DC;
 pd_status_t    pd_status    = PD_STATUS_NO_CHIP;
 uint8_t        pd_chip_id;
+
+/* Probe results, filled by power_source_init() and read by the boot banner. */
+pd_offer_t pd_offers[PD_OFFER_MAX];
+uint8_t    pd_offer_count;
+uint8_t    pd_offer_selected = PD_OFFER_NONE;
 
 /* Apply PDO1=5V/3A baseline only (valid count 1) and renegotiate. This is the
  * guaranteed-safe contract: the source can always meet 5 V, so the MCU stays
@@ -112,6 +118,79 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo){
 	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)sensor_values.USB_PD_power_limit);
 }
 
+/* Ask the source for one (mV, mA) profile. Returns true when the contract was
+ * formed at that voltage (RDO Object_Pos >= 2 means our PDO2 matched a source
+ * PDO), false when the source refused and the link fell back to 5 V. */
+static bool probe_profile(uint16_t mv, uint16_t ma){
+	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
+
+	LCD_show_pd_probe_trying(mv, ma);      /* live feedback on the boot screen */
+
+	stusb_update_pdo(2, mv, ma);
+	stusb_set_valid_pdo(2);
+	stusb_soft_reset();
+	HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
+
+	if(stusb_read_rdo(&rdo) != HAL_OK){
+		return false;
+	}
+
+	debug_print_int(DEBUG_INFO,"Probe mA", ma);
+	debug_print_int(DEBUG_INFO," -> Object_Pos", rdo.b.Object_Pos);
+
+	return (rdo.b.Object_Pos >= 2);
+}
+
+/* Highest current the source accepts at `mv`; 0 when it has no PDO there.
+ * Acceptance is monotonic in current, so: try the full rating first (one probe
+ * for a 5 A supply), then the smallest current to detect "no PDO at this
+ * voltage", then binary search the bracket. */
+static uint16_t probe_voltage(uint16_t mv){
+	if(probe_profile(mv, pd_probe_currents_ma[0])){
+		return pd_probe_currents_ma[0];
+	}
+	if(!probe_profile(mv, pd_probe_currents_ma[PD_CURRENT_COUNT - 1])){
+		return 0;                                   /* no PDO at this voltage */
+	}
+
+	uint8_t lo = 0;                                 /* known rejected, high I  */
+	uint8_t hi = PD_CURRENT_COUNT - 1;              /* known accepted, low I   */
+
+	while((uint8_t)(hi - lo) > 1u){
+		uint8_t mid = (uint8_t)(((uint16_t)lo + hi) / 2u);
+		if(probe_profile(mv, pd_probe_currents_ma[mid])){
+			hi = mid;
+		}
+		else{
+			lo = mid;
+		}
+	}
+
+	return pd_probe_currents_ma[hi];
+}
+
+/* Request one discovered profile and adopt the resulting contract. */
+static bool request_offer(uint8_t index){
+	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
+
+	stusb_update_pdo(2, pd_offers[index].mv, pd_offers[index].ma);
+	stusb_set_valid_pdo(2);
+	stusb_soft_reset();
+	HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
+
+	if((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos < 2)){
+		return false;          /* rejected: the link fell back to 5 V */
+	}
+
+	wait_for_vbus_settle();
+	apply_contract(&rdo);
+	pd_offer_selected = index;
+
+	debug_print_int(DEBUG_INFO,"PD profile mV", pd_offers[index].mv);
+	debug_print_int(DEBUG_INFO,"PD profile mA", pd_offers[index].ma);
+	return true;
+}
+
 /* check STUSB4500 */
 void power_source_init(void){
 	if(stusb_check_connection() != HAL_OK){
@@ -135,87 +214,83 @@ void power_source_init(void){
 
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
 
-	/* FAST PATH. The STUSB4500 negotiates its NVM-programmed PDO set by itself
-	 * as soon as the cable is attached, i.e. long before this code runs. Keep
-	 * that contract only when it is already a strong one (>= 15 V and >= 2 A,
-	 * i.e. at least 30 W): otherwise the chip's default PDO would throttle the
-	 * iron to a fraction of what the charger can deliver, and the probe ladder
-	 * below asks for something better. */
+	/* Put the probe screen up immediately - the discovery below takes several
+	 * seconds and the panel would otherwise stay black until then. */
+	LCD_show_pd_probe_start(pd_probe_voltages_mv, (uint8_t)PD_VOLTAGE_COUNT);
+
+	/* Wait for the chip to report a settled contract. Note the STUSB4500 keeps
+	 * its state across an MCU reset (it is powered from VBUS), so on a plain
+	 * reboot a contract negotiated by an earlier run is still in force. */
 	(void)wait_for_sink_ready(1500);
 	HAL_Delay(100);                       /* let VBUS finish settling */
 
-	if((stusb_read_rdo(&rdo) == HAL_OK) && (rdo.b.Object_Pos != 0)){
-		float v     = sensors_read_bus_voltage_instant();
-		float i     = rdo.b.OperatingCurrent * 0.01f;   /* what the chip asked for  */
-		float i_max = rdo.b.MaxCurrent * 0.01f;         /* what the source offers   */
+	/* Discover the source's fixed-supply grid: for each PD voltage find the
+	 * highest current the charger accepts (see probe_voltage()). PDO1 (5 V) is
+	 * left untouched, so every rejected probe falls back to a safe 5 V contract
+	 * - no brown-out. This takes a few seconds (up to ~6 probes per voltage),
+	 * which is fine at boot and buys an exact picture of the supply. */
+	pd_offer_count = 0;
 
-		debug_print_int(DEBUG_INFO,"Auto contract mV", (int)(v * 1000.0f));
-		debug_print_int(DEBUG_INFO,"Auto contract mA", (int)(i * 1000.0f));
-		debug_print_int(DEBUG_INFO,"Source PDO max mA", (int)(i_max * 1000.0f));
+	for(uint8_t v = 0; v < PD_VOLTAGE_COUNT; v++){
+		uint16_t mv = pd_probe_voltages_mv[v];
+		uint16_t ma = probe_voltage(mv);
 
-		if((v >= 15.0f) && (i >= 2.0f)){
-			apply_contract(&rdo);
-			return;
+		LCD_show_pd_probe_result(v, mv, ma);
+
+		if(ma == 0u){
+			debug_print_int(DEBUG_INFO,"PD no PDO at mV", mv);
+			continue;
 		}
 
-		/* The chip's NVM PDO may ask for far less current than the source
-		 * offers (e.g. 20 V/1 A while the charger can do 20 V/3 A). The RDO
-		 * carries the source's own figure in MaxCurrent, so request the same
-		 * voltage at that current - one renegotiation instead of the ladder. */
-		if((v >= 15.0f) && (i_max > (i + 0.1f))){
-			uint16_t mv = (uint16_t)(((uint16_t)(v * 1000.0f) / 50u) * 50u);   /* 50 mV steps */
+		pd_offers[pd_offer_count].mv       = mv;
+		pd_offers[pd_offer_count].ma       = ma;
+		pd_offers[pd_offer_count].accepted = true;
+		pd_offer_count++;
+	}
 
-			stusb_update_pdo(2, mv, (uint16_t)(i_max * 1000.0f));
-			stusb_set_valid_pdo(2);
-			stusb_soft_reset();
-			HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
+	/* Highest power first, so entry 0 is the automatic choice. */
+	for(uint8_t i = 1; i < pd_offer_count; i++){
+		pd_offer_t tmp = pd_offers[i];
+		uint32_t p = (uint32_t)tmp.mv * tmp.ma;
+		int8_t   j = (int8_t)(i - 1);
 
-			if((stusb_read_rdo(&rdo) == HAL_OK) && (rdo.b.Object_Pos != 0) &&
-			   ((rdo.b.OperatingCurrent * 0.01f) >= 2.0f)){
-				debug_print_str(DEBUG_INFO,"Source PDO accepted at its max current");
-				wait_for_vbus_settle();
-				apply_contract(&rdo);
-				return;
+		while((j >= 0) && (((uint32_t)pd_offers[j].mv * pd_offers[j].ma) < p)){
+			pd_offers[j + 1] = pd_offers[j];
+			j--;
+		}
+		pd_offers[j + 1] = tmp;
+	}
+
+	/* Pick the profile to run on: the user's stored preference (a voltage) when
+	 * the source still offers it, otherwise the most powerful discovered one. */
+	uint8_t chosen = 0;
+	float   pref   = flash_values.pd_profile;
+
+	if(pref > 0.0f){
+		for(uint8_t i = 0; i < pd_offer_count; i++){
+			if(fabsf(((float)pd_offers[i].mv / 1000.0f) - pref) < 0.6f){
+				chosen = i;
+				debug_print_str(DEBUG_INFO,"PD: using stored voltage");
+				break;
 			}
 		}
 	}
 
-	/* SLOW PATH. The automatic contract is weak (or unknown), so ask for more.
-	 * PDO1 (5 V) is left untouched, so every rejected request falls back to a
-	 * safe 5 V contract - no brown-out - which also makes the explicit 5 V
-	 * baseline unnecessary here. Probe the ladder, highest power first, and stop
-	 * at the first profile the charger accepts. */
-	bool accepted = false;
-	for(uint8_t i = 0; i < PD_PROBE_COUNT; i++){
-		stusb_update_pdo(2, pd_probe_ladder[i].mv, pd_probe_ladder[i].ma);
-		stusb_set_valid_pdo(2);
-		stusb_soft_reset();
-		HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);   /* let the renegotiation complete */
-
-		stusb_read_rdo(&rdo);
-		debug_print_int(DEBUG_INFO,"Probe mV", pd_probe_ladder[i].mv);
-		debug_print_int(DEBUG_INFO," -> Object_Pos", rdo.b.Object_Pos);
-		/* RDO Object_Pos is the SOURCE capability index that got contracted
-		 * (1-based), NOT our sink slot. Source PDO 1 is always 5 V, so
-		 * Object_Pos == 1 means PDO2 was rejected and the link fell back to 5 V.
-		 * Any Object_Pos >= 2 means PDO2 matched a source PDO at the requested
-		 * voltage => the charger supports this profile => accept it. */
-		if(rdo.b.Object_Pos >= 2){
-			accepted = true;
-			break;
+	if(pd_offer_count > 0u){
+		pd_offer_selected = chosen;
+		if(request_offer(chosen)){
+			return;                       /* contract adopted and applied */
 		}
+		debug_print_str(DEBUG_WARNING,"Chosen profile rejected - falling back");
 	}
 
-	/* If nothing was accepted, return to a clean 5 V baseline contract. */
-	if(!accepted){
-		debug_print_str(DEBUG_WARNING,"No high-power PDO accepted - holding 5V");
-		request_5v_baseline();
-		HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
-		stusb_read_rdo(&rdo);
-	}
+	/* Nothing usable: hold the guaranteed-safe 5 V baseline. */
+	pd_offer_selected = PD_OFFER_NONE;
+	debug_print_str(DEBUG_WARNING,"No high-power PDO accepted - holding 5V");
+	request_5v_baseline();
+	HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
 
-	/* Confirm an explicit PD contract exists. */
-	if(rdo.b.Object_Pos == 0){
+	if((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos == 0)){
 		pd_status = PD_STATUS_NO_CONTRACT;
 		debug_print_str(DEBUG_INFO,"No USB-PD contract");
 		return;   /* leave power_source = POWER_DC */
@@ -224,4 +299,27 @@ void power_source_init(void){
 	/* Let VBUS settle at the negotiated voltage before measuring it. */
 	wait_for_vbus_settle();
 	apply_contract(&rdo);
+}
+
+/* Switch the link to one of the discovered profiles and recompute the power
+ * limit. Used by the boot-time mode chooser: the caller persists the choice so
+ * the next start uses it directly. */
+bool power_source_apply_offer(uint8_t index){
+	if((index >= pd_offer_count) || !pd_offers[index].accepted){
+		return false;
+	}
+
+	uint8_t previous = pd_offer_selected;
+
+	if(request_offer(index)){
+		return true;
+	}
+
+	/* The source changed its mind: keep the station alive on the profile it
+	 * was using before. */
+	debug_print_str(DEBUG_WARNING,"PD profile switch failed");
+	if((previous != PD_OFFER_NONE) && (previous != index)){
+		(void)request_offer(previous);
+	}
+	return false;
 }

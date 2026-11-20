@@ -41,20 +41,20 @@ select), so the FAT volume lives in the STM32G431 internal flash.
 
 | Region | Address | Size | Purpose |
 |---|---|---|---|
-| `FLASH` | `0x08000000` | 104 KB | Firmware |
-| `FS` | `0x0801A000` | 20 KB | FAT12 volume (40 sectors × 512 B) |
+| `FLASH` | `0x08000000` | 106 KB | Firmware |
+| `FS` | `0x0801A800` | 18 KB | FAT12 volume (36 sectors × 512 B) |
 | `PROFILES` | `0x0801F000` | 2 KB | Tip profiles |
 | `SETTINGS` | `0x0801F800` | 2 KB | User settings |
 
-The volume uses 512-byte clusters, a single FAT and a 16-entry root directory,
-which leaves 37 clusters for data. It is formatted on the first entry into the
+The volume uses 512-byte clusters, a single FAT and a 64-entry root directory,
+which leaves 30 clusters for data. It is formatted on the first entry into the
 mode (`fs_disk_format()` in `Core/Src/fs_disk.c`) — the boot sector, FAT and
 root directory are written directly, because `f_mkfs()` refuses volumes smaller
 than 32 KB (`MIN_VOLUME`), which does not fit next to the firmware.
 
 Two FatFS "implementation limits" are therefore overridden in
-`Middlewares/Third_Party/FatFS/src/ffconf.h` (`MIN_VOLUME 40`, `MIN_FAT12 32`);
-a 40-sector FAT12 volume is valid per the FAT specification, and the volume is
+`Middlewares/Third_Party/FatFS/src/ffconf.h` (`MIN_VOLUME 36`, `MIN_FAT12 24`);
+a 36-sector FAT12 volume is valid per the FAT specification, and the volume is
 only ever touched by this firmware or by a host writing the settings file.
 
 ### Flash wear and interrupts
@@ -82,6 +82,7 @@ temperature_offset=0.00
 standby_temp=150.00
 ...
 heat_at_startup=0.00
+pd_profile=-1.00
 ```
 
 - One `key=value` pair per line, CR/LF or LF, `#` or `;` starts a comment.
@@ -109,7 +110,13 @@ matches the settings menu order:
 `detect_nt115`, `power_limit_T245`, `power_limit_T210`, `power_limit_NT115`,
 `power_limit_No_name`, `display_graph`, `delta_t_detection`, `standby_delay`,
 `show_profile_on_tip_change`, `change_enc_dir`, `encoder_step_idx`,
-`heat_at_startup`.
+`heat_at_startup`, `pd_profile`.
+
+`pd_profile` is the USB-PD voltage the station prefers at start-up: `-1` picks
+the most powerful mode the source offers, any other value (e.g. `15`) prefers
+that voltage and falls back to the most powerful mode when the source has no PDO
+there. The list shown at boot is the discovered grid — voltage × highest current
+the charger accepted.
 
 ---
 
