@@ -272,6 +272,7 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
 	stusb_msg_t msg;
 	uint8_t     pdo1[4];
 	uint32_t    pdo;
+	uint8_t     number;
 	bool        accepted = false;
 	uint32_t    deadline;
 
@@ -281,12 +282,20 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
 		stusb_log("cannot read PDO1\n");
 		return STUSB_CONTRACT_TIMEOUT;
 	}
-	pdo = (le32(pdo1) & STUSB_PDO_TEMPLATE_MASK) | STUSB_PDO_WORD(mv, ma);
 
-	/* PDO2 first, then the count: raising the count before PDO2 is written
-	 * would let the chip negotiate the stale PDO2. */
-	if ((stusb_write_snk_pdo(2, pdo) != HAL_OK) ||
-	    (stusb_set_valid_pdo(2) != HAL_OK) ||
+	/* 5 V is PDO1: the PD spec fixes its voltage, so only the current is
+	 * programmed and the sink keeps a single PDO. Asking for 5 V through PDO2
+	 * would advertise two identical PDOs, and the resulting contract may
+	 * legitimately land on PDO1 - which must not be read as a rejection (that
+	 * is what made "run on 5 V" fall back to a stale 20 V contract). */
+	number = (mv <= 5000u) ? 1u : 2u;
+	pdo    = (le32(pdo1) & STUSB_PDO_TEMPLATE_MASK) |
+	         ((number == 1u) ? STUSB_PDO_WORD(5000u, ma) : STUSB_PDO_WORD(mv, ma));
+
+	/* PDO first, then the count: raising the count before the PDO is written
+	 * would let the chip negotiate a stale profile. */
+	if ((stusb_write_snk_pdo(number, pdo) != HAL_OK) ||
+	    (stusb_set_valid_pdo(number) != HAL_OK) ||
 	    (stusb_soft_reset() != HAL_OK)) {
 		stusb_log("request: i2c failed\n");
 		return STUSB_CONTRACT_TIMEOUT;
@@ -317,10 +326,10 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
 		return STUSB_CONTRACT_TIMEOUT;
 	}
 
-	/* The RDO names the source PDO the link settled on: 2 means our PDO2 was
-	 * accepted, 1 means the source fell back to PDO1 (5 V). */
-	if ((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos < 2)) {
-		stusb_log("contract fell back to PDO1\n");
+	/* The RDO names the source PDO the link settled on; a 5 V request has to
+	 * land on PDO1, anything higher on our PDO2, and 0 means no contract. */
+	if ((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos != number)) {
+		stusb_log("contract settled elsewhere\n");
 		return STUSB_CONTRACT_REJECTED;
 	}
 
