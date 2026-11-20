@@ -116,7 +116,8 @@ static bool wait_for_sink_ready(uint32_t timeout_ms){
  * current the station itself needs. `req_mv`/`req_ma` are what was requested
  * (0/0 when the controller's own contract simply stands). */
 static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo,
-                           uint16_t req_mv, uint16_t req_ma){
+                           uint16_t req_mv, uint16_t req_ma,
+                           const stusb_dpm_trace_t *trace){
 	power_source = POWER_USB;
 	pd_status    = PD_STATUS_OK;
 
@@ -144,7 +145,7 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo,
 	                  (uint8_t)rdo->b.Object_Pos,
 	                  (float)rdo->b.MaxCurrent * 0.01f,
 	                  (float)rdo->b.OperatingCurrent * 0.01f,
-	                  sensor_values.USB_PD_power_limit);
+	                  sensor_values.USB_PD_power_limit, trace);
 	HAL_Delay(8000);
 #endif
 }
@@ -203,8 +204,9 @@ static uint8_t discover_offers(void){
 /* Request one of the discovered profiles and adopt the resulting contract. */
 static bool request_offer(uint8_t index){
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
+	stusb_dpm_trace_t trace;
 
-	if(stusb_request_contract(pd_offers[index].mv, pd_offers[index].ma) != STUSB_CONTRACT_OK){
+	if(stusb_request_contract(pd_offers[index].mv, pd_offers[index].ma, &trace) != STUSB_CONTRACT_OK){
 		return false;          /* rejected or no answer: the link stays at 5 V */
 	}
 
@@ -216,7 +218,7 @@ static bool request_offer(uint8_t index){
 		return false;
 	}
 
-	apply_contract(&rdo, pd_offers[index].mv, pd_offers[index].ma);
+	apply_contract(&rdo, pd_offers[index].mv, pd_offers[index].ma, &trace);
 	pd_offer_selected = index;
 
 	debug_print_int(DEBUG_INFO,"PD profile mV", pd_offers[index].mv);
@@ -314,7 +316,7 @@ void power_source_init(void){
 
 	/* Let VBUS settle at the negotiated voltage before measuring it. */
 	wait_for_vbus_settle(0.0f);
-	apply_contract(&rdo, 0u, 0u);
+	apply_contract(&rdo, 0u, 0u, NULL);
 
 	if(caps_unreadable){
 		/* The 5 V contract is fine, only the capability list is missing - keep

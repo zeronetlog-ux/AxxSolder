@@ -657,7 +657,8 @@ static void nvm_hex_line(char *out, size_t len, uint8_t tag, const uint8_t *data
 }
 
 void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
-                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a, float limit)
+                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a, float limit,
+                       const stusb_dpm_trace_t *trace)
 {
     char     line[40];
     uint16_t y = 34;
@@ -671,6 +672,18 @@ void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
                    (unsigned)(int)req_v, (unsigned)((int)(req_v * 100.0f) % 100),
                    (unsigned)(int)req_a, (unsigned)((int)(req_a * 100.0f) % 100));
     LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+
+    y = (uint16_t)(y + 20u);
+    if (trace != 0) {
+        (void)snprintf(line, sizeof(line), "dpm  %u %08lX",
+                       (unsigned)trace->count_readback, (unsigned long)trace->pdo_readback);
+        LCD_PutStr(8, y, line, FONT_arial_12X15, C_Warning, C_Background);
+
+        y = (uint16_t)(y + 20u);
+        (void)snprintf(line, sizeof(line), "post %u %08lX",
+                       (unsigned)trace->count_after, (unsigned long)trace->pdo_after);
+        LCD_PutStr(8, y, line, FONT_arial_12X15, C_Warning, C_Background);
+    }
 
     y = (uint16_t)(y + 20u);
     (void)snprintf(line, sizeof(line), "vbus %u.%02uV",

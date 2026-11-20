@@ -270,15 +270,26 @@ static HAL_StatusTypeDef stusb_write_snk_pdo(uint8_t number, uint32_t pdo)
 	return stusb_write_register((uint8_t)(STUSB_REG_DPM_SNK_PDO1 + (4u * (number - 1u))), raw, 4);
 }
 
-stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
+stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma, stusb_dpm_trace_t *trace)
 {
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
 	stusb_msg_t msg;
 	uint8_t     pdo1[4];
+	uint8_t     raw[4];
 	uint32_t    pdo;
 	uint8_t     number;
+	uint8_t     pdo_addr;
 	bool        accepted = false;
 	uint32_t    deadline;
+
+	if (trace != NULL) {
+		trace->count_written  = 0;
+		trace->pdo_written    = 0;
+		trace->count_readback = 0;
+		trace->pdo_readback   = 0;
+		trace->count_after    = 0;
+		trace->pdo_after      = 0;
+	}
 
 	/* PDO1 carries the flags every sink PDO needs (USB communication capable,
 	 * power/data roles...); only the voltage and current fields are replaced. */
@@ -289,18 +300,29 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
 
 	/* 5 V is PDO1: the PD spec fixes its voltage, so only the current is
 	 * programmed and the sink keeps a single PDO. Asking for 5 V through PDO2
-	 * would advertise two identical PDOs, and the resulting contract may
-	 * legitimately land on PDO1 - which must not be read as a rejection (that
-	 * is what made "run on 5 V" fall back to a stale 20 V contract). */
-	number = (mv <= 5000u) ? 1u : 2u;
-	pdo    = (le32(pdo1) & STUSB_PDO_TEMPLATE_MASK) |
-	         ((number == 1u) ? STUSB_PDO_WORD(5000u, ma) : STUSB_PDO_WORD(mv, ma));
+	 * would advertise two identical PDOs. */
+	number   = (mv <= 5000u) ? 1u : 2u;
+	pdo_addr = (uint8_t)(STUSB_REG_DPM_SNK_PDO1 + (4u * (number - 1u)));
+	pdo      = (le32(pdo1) & STUSB_PDO_TEMPLATE_MASK) |
+	           ((number == 1u) ? STUSB_PDO_WORD(5000u, ma) : STUSB_PDO_WORD(mv, ma));
 
-	/* PDO first, then the count: raising the count before the PDO is written
-	 * would let the chip negotiate a stale profile. */
-	if ((stusb_write_snk_pdo(number, pdo) != HAL_OK) ||
-	    (stusb_set_valid_pdo(number) != HAL_OK) ||
-	    (stusb_soft_reset() != HAL_OK)) {
+	/* Count first, then the PDO - the order the reference driver uses. */
+	if ((stusb_set_valid_pdo(number) != HAL_OK) ||
+	    (stusb_write_snk_pdo(number, pdo) != HAL_OK)) {
+		stusb_log("request: i2c failed\n");
+		return STUSB_CONTRACT_TIMEOUT;
+	}
+
+	if (trace != NULL) {
+		trace->count_written = number;
+		trace->pdo_written   = pdo;
+		(void)stusb_read_register(STUSB_REG_DPM_PDO_NUMB, &trace->count_readback, 1);
+		if (stusb_read_register(pdo_addr, raw, 4) == HAL_OK) {
+			trace->pdo_readback = le32(raw);
+		}
+	}
+
+	if (stusb_soft_reset() != HAL_OK) {
 		stusb_log("request: i2c failed\n");
 		return STUSB_CONTRACT_TIMEOUT;
 	}
@@ -330,24 +352,33 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
 		return STUSB_CONTRACT_TIMEOUT;
 	}
 
-	/* The RDO names the source PDO the link settled on; a 5 V request has to
-	 * land on PDO1, anything higher on our PDO2, and 0 means no contract. The
-	 * register lags the PS_RDY by a few milliseconds, so poll it briefly instead
-	 * of reading once. */
+	/* What does the controller report after the exchange? */
+	if (trace != NULL) {
+		(void)stusb_read_register(STUSB_REG_DPM_PDO_NUMB, &trace->count_after, 1);
+		if (stusb_read_register(pdo_addr, raw, 4) == HAL_OK) {
+			trace->pdo_after = le32(raw);
+		}
+	}
+
+	/* The RDO tells which source PDO the link settled on (0 = none). Its object
+	 * position is the SOURCE PDO number and has nothing to do with our sink PDO
+	 * index - comparing the two used to reject every contract that landed on a
+	 * source PDO other than 1 or 2, which is most of them. The granted operating
+	 * current is taken from the RDO by the caller. */
 	deadline = HAL_GetTick() + STUSB_CONTRACT_SETTLE_MS;
 	do {
 		if (stusb_read_rdo(&rdo) != HAL_OK) {
 			return STUSB_CONTRACT_TIMEOUT;
 		}
-		if (rdo.b.Object_Pos == number) {
+		if (rdo.b.Object_Pos != 0u) {
 			stusb_log("contract ok\n");
 			return STUSB_CONTRACT_OK;
 		}
 		HAL_Delay(10);
 	} while (HAL_GetTick() < deadline);
 
-	stusb_log("contract settled elsewhere\n");
-	return STUSB_CONTRACT_REJECTED;
+	stusb_log("no contract\n");
+	return STUSB_CONTRACT_TIMEOUT;
 }
 
 HAL_StatusTypeDef stusb_nvm_read(uint8_t *out)

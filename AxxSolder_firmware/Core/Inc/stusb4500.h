@@ -61,6 +61,19 @@ typedef enum {
 	STUSB_CONTRACT_TIMEOUT             /* no answer within the window         */
 } stusb_contract_t;
 
+/* What happened to the sink PDO registers during a request - read back right
+ * after programming them and again after the renegotiation. If the second pair
+ * differs from the first, the controller replaced the runtime profile with the
+ * one stored in its NVM before it sent its Request. */
+typedef struct {
+	uint8_t  count_written;
+	uint32_t pdo_written;
+	uint8_t  count_readback;
+	uint32_t pdo_readback;
+	uint8_t  count_after;
+	uint32_t pdo_after;
+} stusb_dpm_trace_t;
+
 /* Cable detection: raw register values plus the two decoded flags. */
 typedef struct {
 	bool    attached;                  /* a plug is detected on either CC     */
@@ -97,11 +110,11 @@ bool stusb_poll_message(stusb_msg_t *msg);
 uint8_t stusb_read_source_pdos(stusb_pdo_t *out, uint8_t max,
                                uint16_t per_try_ms, uint8_t attempts);
 
-/* Ask the source for one (mV, mA) contract: PDO2 is programmed from the PDO1
- * template, the PDO count is raised to two and a soft reset starts the
- * renegotiation. Returns what the source answered (Accept + PS_RDY and a
- * matching RDO means OK). */
-stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma);
+/* Ask the source for one (mV, mA) contract: the sink PDO is programmed, the PDO
+ * count set and a soft reset starts the renegotiation. Returns what the source
+ * answered (Accept + PS_RDY and a matching RDO means OK). `trace` is optional
+ * and receives the register values around the request. */
+stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma, stusb_dpm_trace_t *trace);
 
 /* Read the Type-C attach state and orientation. */
 void stusb_read_cable(stusb_cable_t *cable);
