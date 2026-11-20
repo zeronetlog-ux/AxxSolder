@@ -13,11 +13,14 @@ $CC -std=c11 -O2 -Wall \
     -I Core/Inc \
     -I Middlewares/Third_Party/FatFS/src \
     -include tools/fs_test/host_flash.h \
+    -include tools/fs_test/include/pid_types.h \
+    -DINC_PID_H \
     -DFS_DISK_BASE='((uintptr_t)host_flash_region)' \
-    -DFS_DISK_SECTORS=40u \
+    -DFS_DISK_SECTORS=36u \
     tools/fs_test/main.c \
     Core/Src/fs_disk.c \
     Core/Src/settings_file.c \
+    Core/Src/profile_file.c \
     Middlewares/Third_Party/FatFS/src/ff.c \
     -o "$OUT"
 

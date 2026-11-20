@@ -46,6 +46,66 @@ void settings_save(void)
     saves++;
 }
 
+/* ---- Tip-profile stubs (simple in-RAM store) -------------------------- */
+
+#include "profile_file.h"
+#include "tip_profile.h"
+
+static TipProfile stub_profiles[MAX_PROFILES];
+static uint8_t    stub_count;
+static uint8_t    stub_active[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
+static int        profile_saves;
+
+uint8_t tip_profiles_count(void)
+{
+    return stub_count;
+}
+
+TipProfile *tip_profiles_get(uint8_t index)
+{
+    return (index < stub_count) ? &stub_profiles[index] : NULL;
+}
+
+StoreResult tip_profiles_add(const TipProfile *p)
+{
+    if (stub_count >= MAX_PROFILES) {
+        return STORE_ERR_FULL;
+    }
+    stub_profiles[stub_count++] = *p;
+    return STORE_OK;
+}
+
+StoreResult tip_profiles_clear(void)
+{
+    stub_count = 0;
+    memset(stub_active, 0xFF, sizeof(stub_active));
+    return STORE_OK;
+}
+
+StoreResult tip_profiles_save(void)
+{
+    profile_saves++;
+    return STORE_OK;
+}
+
+StoreResult tip_profiles_reload(void)
+{
+    return STORE_OK;
+}
+
+void tip_profiles_set_active(enum handles h, uint8_t idx)
+{
+    if ((idx != 0xFFu) && (idx >= stub_count)) {
+        return;
+    }
+    stub_active[h] = idx;
+}
+
+uint8_t tip_profiles_get_active(enum handles h)
+{
+    return stub_active[h];
+}
+
 /* ---- Test helpers ----------------------------------------------------- */
 
 static int failures;
@@ -60,11 +120,11 @@ static void check(int condition, const char *what)
     }
 }
 
-static FRESULT write_file(const char *text)
+static FRESULT write_file_to(const char *path, const char *text)
 {
     FIL     file;
     UINT    written;
-    FRESULT res = f_open(&file, SETTINGS_FILE_PATH, FA_CREATE_ALWAYS | FA_WRITE);
+    FRESULT res = f_open(&file, path, FA_CREATE_ALWAYS | FA_WRITE);
 
     if (res != FR_OK) {
         return res;
@@ -73,6 +133,11 @@ static FRESULT write_file(const char *text)
     res = f_write(&file, text, (UINT)strlen(text), &written);
     (void)f_close(&file);
     return res;
+}
+
+static FRESULT write_file(const char *text)
+{
+    return write_file_to(SETTINGS_FILE_PATH, text);
 }
 
 static void print_file(const char *dump_path)
@@ -115,7 +180,7 @@ int main(void)
     res = f_mount(&fs, "", 1);
     check(res == FR_NO_FILESYSTEM, "mount before format returns FR_NO_FILESYSTEM");
     (void)disk_ioctl(0, GET_SECTOR_COUNT, &sectors);
-    check(sectors == 40, "GET_SECTOR_COUNT == 40");
+    check(sectors == 36, "GET_SECTOR_COUNT == 36");
 
     printf("\n2) formatting\n");
     res = fs_disk_format();
@@ -200,6 +265,69 @@ int main(void)
     res = f_mount(&fs, "", 1);
     check(res == FR_OK, "remount == FR_OK");
     print_file("/tmp/axx_cfg_after.bin");
+
+    printf("\n8) tip profiles as separate files\n");
+    memset(stub_profiles, 0, sizeof(stub_profiles));
+    (void)strcpy(stub_profiles[0].name, "T245 default");
+    stub_profiles[0].handle_type = T245;
+    stub_profiles[0].def         = 1;
+    stub_profiles[0].kp          = 8.0f;
+    stub_profiles[0].ki          = 2.0f;
+    stub_profiles[0].kd          = 0.5f;
+    stub_profiles[0].max_i       = 300.0f;
+    stub_profiles[0].power_limit = 30.0f;
+
+    for (uint8_t c = 0; c < NUM_CAL_POINTS; c++) {
+        stub_profiles[0].temp_cal[c] = 100.0f + ((float)c * 70.0f);
+    }
+
+    (void)strcpy(stub_profiles[1].name, "NT115 fine");
+    stub_profiles[1].handle_type = NT115;
+    stub_profiles[1].kp          = 5.0f;
+    stub_profiles[1].ki          = 2.0f;
+    stub_profiles[1].kd          = 0.3f;
+    stub_profiles[1].max_i       = 200.0f;
+
+    stub_count        = 2;
+    stub_active[T245]  = 0;
+    stub_active[NT115] = 1;
+
+    res = profile_files_export();
+    check(res == FR_OK, "profile_files_export() == FR_OK");
+
+    FILINFO fno;
+    check(f_stat("/P01.CFG", &fno) == FR_OK, "/P01.CFG written");
+    check(f_stat("/P02.CFG", &fno) == FR_OK, "/P02.CFG written");
+    check(f_stat("/ACTIVE.CFG", &fno) == FR_OK, "/ACTIVE.CFG written");
+    check(f_stat("/P03.CFG", &fno) == FR_OK, "/P03.CFG used as the empty slot marker");
+
+    /* Host edits the first profile and empties the second one. */
+    res = write_file_to("/P01.CFG",
+        "# AxxSolder tip profile\r\nversion=1\r\n"
+        "name=T245 hot\r\nhandle=T245\r\ndefault=1\r\n"
+        "kp=9.50\r\nki=3.00\r\nkd=0.40\r\nmax_i=250.00\r\npower_limit=25.00\r\n"
+        "temp_cal_100=101.00\r\ntemp_cal_200=202.00\r\ntemp_cal_300=303.00\r\n"
+        "temp_cal_350=354.00\r\ntemp_cal_400=405.00\r\ntemp_cal_450=456.00\r\n");
+    check(res == FR_OK, "host write to /P01.CFG");
+
+    res = write_file_to("/P02.CFG", "# AxxSolder tip profile\r\nversion=1\r\n");
+    check(res == FR_OK, "host emptied /P02.CFG");
+
+    memset(stub_profiles, 0, sizeof(stub_profiles));
+    stub_count = 0;
+    memset(stub_active, 0xFF, sizeof(stub_active));
+    profile_saves = 0;
+
+    int16_t imported = profile_files_import();
+    check(imported == 1, "one profile imported (empty file stops the scan)");
+    check(profile_saves == 1, "profile store saved once");
+    check(strcmp(stub_profiles[0].name, "T245 hot") == 0, "name parsed");
+    check(stub_profiles[0].handle_type == T245, "handle parsed");
+    check((stub_profiles[0].kp > 9.49f) && (stub_profiles[0].kp < 9.51f), "kp parsed (9.50)");
+    check(stub_profiles[0].power_limit == 25.0f, "power_limit parsed");
+    check((stub_profiles[0].temp_cal[3] > 353.9f) && (stub_profiles[0].temp_cal[3] < 354.1f),
+          "temp_cal_350 -> index 3");
+    check(tip_profiles_get_active(T245) == 0, "active index applied");
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "PASSED",
            failures, (failures == 1) ? "" : "s");

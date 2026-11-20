@@ -45,13 +45,13 @@
 #define FF_CODE_PAGE    437
 /* OEM code page. 437 = US. Only 8.3 names are used (FF_USE_LFN = 0). */
 
-/* FatFS "implementation limits" from ff.c, overridden here: a 40-sector
- * (20 KB) FAT12 volume with 37 clusters is valid per the FAT specification but
+/* FatFS "implementation limits" from ff.c, overridden here: a 36-sector
+ * (18 KB) FAT12 volume with 30 clusters is valid per the FAT specification but
  * below FatFS's heuristics (64 sectors / 32 clusters), which would otherwise
  * require a >= 32 KB volume that does not fit next to the firmware. The volume
  * is created by fs_disk_format() and only ever touched by this firmware. */
-#define MIN_VOLUME      40      /* sectors */
-#define MIN_FAT12       32      /* clusters (volume has 37) */
+#define MIN_VOLUME      36      /* sectors */
+#define MIN_FAT12       24      /* clusters (volume has 30) */
 
 #define FF_USE_LFN      0
 #define FF_MAX_LFN      255

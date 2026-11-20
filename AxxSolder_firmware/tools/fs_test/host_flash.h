@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* RAM buffer that stands in for the "FS" flash region during host tests. */
-#define HOST_FLASH_SIZE   (40u * 512u)   /* 20 KB, matches the linker region */
+#define HOST_FLASH_SIZE   (36u * 512u)   /* 18 KB, matches the linker region */
 
 extern uint8_t host_flash_region[HOST_FLASH_SIZE];
 

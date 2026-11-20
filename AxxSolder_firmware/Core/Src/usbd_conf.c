@@ -14,9 +14,6 @@ USBD_HandleTypeDef hUsbDeviceFS;
 
 /* Diagnostics: number of USB interrupts taken (host activity indicator). */
 volatile uint32_t usb_irq_count;
-volatile uint32_t usb_reset_count;
-volatile uint32_t usb_ctr_count;
-volatile uint32_t usb_err_count;
 
 /* ------------------------------------------------------------------ */
 /* Static allocation for the class drivers                            */
@@ -65,19 +62,6 @@ void HAL_PCD_MspDeInit(PCD_HandleTypeDef *pcdHandle)
 /* Vector from the startup file */
 void USB_LP_IRQHandler(void)
 {
-    uint16_t istr = USB->ISTR;
-
-    usb_irq_count++;
-    if ((istr & USB_ISTR_RESET) != 0u) {
-        usb_reset_count++;
-    }
-    if ((istr & USB_ISTR_CTR) != 0u) {
-        usb_ctr_count++;
-    }
-    if ((istr & USB_ISTR_ERR) != 0u) {
-        usb_err_count++;
-    }
-
     HAL_PCD_IRQHandler(&hpcd_USB_FS);
 }
 

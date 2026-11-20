@@ -125,8 +125,10 @@ DRESULT fs_disk_sync(void)
  * f_mkfs() cannot be used here: it refuses volumes smaller than MIN_VOLUME
  * (64 sectors = 32 KB), which does not fit next to the firmware. FatFS itself
  * only needs more than 32 clusters when mounting, so this writes the VBR, FAT
- * and root directory by hand for a 40-sector volume (512-byte clusters,
- * 1 reserved sector, 1 FAT, 16 root entries -> 37 clusters).
+ * and root directory by hand for a 36-sector volume: 1 reserved sector, 1 FAT
+ * sector, 4 root-directory sectors (64 entries: AXX.CFG, ACTIVE.CFG, 24 profile
+ * files and the metadata files a host may create) and 30 data clusters of one
+ * sector each.
  *
  * The volume is a "superfloppy" (no MBR), which Windows/macOS/Linux all mount
  * for FAT12. */
@@ -136,7 +138,7 @@ FRESULT fs_disk_format(void)
 
 	const uint16_t reserved     = 1;
 	const uint16_t fat_sectors  = 1;
-	const uint16_t root_entries = 16;
+	const uint16_t root_entries = 64;   /* 4 sectors: settings + 24 profiles + host metadata */
 	const uint16_t root_sectors = (root_entries * 32u) / FS_DISK_SECTOR_SIZE;
 	const uint16_t total        = (uint16_t)FS_DISK_SECTORS;
 	const uint8_t  media        = 0xF8;
@@ -145,7 +147,7 @@ FRESULT fs_disk_format(void)
 	page_cache_addr  = 0;
 	page_cache_dirty = false;
 
-	if ((total <= reserved + fat_sectors + root_sectors + 32u) ||
+	if ((total <= reserved + fat_sectors + root_sectors + 24u) ||
 	    (total < (FS_DISK_PAGE_SIZE / FS_DISK_SECTOR_SIZE))) {
 		return FR_INVALID_PARAMETER;   /* volume too small for FAT12 */
 	}

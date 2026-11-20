@@ -45,6 +45,11 @@ void        tip_profiles_init(const StorageDriver *drv);
 StoreResult tip_profiles_reset(void);
 StoreResult tip_profiles_save(void);
 
+/* USB-storage import helpers: drop the RAM list without touching flash, and
+ * re-read the store from flash (used when the media holds no profile files). */
+StoreResult tip_profiles_clear(void);
+StoreResult tip_profiles_reload(void);
+
 /* CRUD */
 uint8_t     tip_profiles_count(void);
 TipProfile *tip_profiles_get(uint8_t index);

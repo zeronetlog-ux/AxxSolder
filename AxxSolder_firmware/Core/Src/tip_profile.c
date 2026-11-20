@@ -108,21 +108,55 @@ void tip_profiles_init(const StorageDriver *drv)
 {
 	driver = drv;
 
-	StoreResult res = driver->read(PROFILES_PAGE, &cache, sizeof(ProfileStore));
+	(void)tip_profiles_reload();
+}
+
+/* Re-read the profile store from flash, falling back to the defaults if the
+ * page is not valid (same rules as tip_profiles_init). */
+StoreResult tip_profiles_reload(void)
+{
+	StoreResult res;
+
+	if (driver == NULL) {
+		return STORE_ERR_INVALID;   /* not initialised yet */
+	}
+
+	res = driver->read(PROFILES_PAGE, &cache, sizeof(ProfileStore));
 
 	if (res != STORE_OK || cache.magic != PROFILES_MAGIC || cache.version != PROFILES_VERSION) {
 		tip_profiles_reset();
 	}
+
+	return res;
+}
+
+/* Empty the RAM list without writing flash: the USB-storage import then adds
+ * the profiles read from the media and saves once. */
+StoreResult tip_profiles_clear(void)
+{
+	memset(&cache, 0, sizeof(cache));
+	cache.magic = PROFILES_MAGIC;
+	cache.version = PROFILES_VERSION;
+	cache.count = 0;
+	memset(cache.active_idx, 0xFF, sizeof(cache.active_idx));
+	return STORE_OK;
 }
 
 StoreResult tip_profiles_reset(void)
 {
 	create_defaults();
+
+	if (driver == NULL) {
+		return STORE_ERR_INVALID;
+	}
 	return driver->write(PROFILES_PAGE, &cache, sizeof(ProfileStore));
 }
 
 StoreResult tip_profiles_save(void)
 {
+	if (driver == NULL) {
+		return STORE_ERR_INVALID;
+	}
 	return driver->write(PROFILES_PAGE, &cache, sizeof(ProfileStore));
 }
 

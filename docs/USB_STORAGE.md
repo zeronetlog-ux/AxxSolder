@@ -15,8 +15,11 @@ between stations.
    a removable drive named `AXXSOLDER` with a single file, `AXX.CFG`.
 3. Edit the file with any text editor, save it and eject/unmount the volume.
 4. **Ejecting the volume reboots the station into the normal firmware** (the
-   pending edits are applied first, the display shows `Rebooting to normal
-   mode...`). Removing the power also works and is still the fallback.
+   pending edits are applied first, the display shows `Rebooting...`). Note that
+   a plain *unmount* (`diskutil unmount`, "Unmount" in Disk Utility) does not
+   send a SCSI eject, so it only applies the edits - use *Eject*
+   (Finder's ⏏ button / `diskutil eject`) to leave the mode. Removing the power
+   also works and is still the fallback.
 
 The firmware watches the SCSI medium state of the class driver: an eject
 (`START STOP UNIT` with LoEj) or an unmount (`ALLOW MEDIUM REMOVAL` with
@@ -69,7 +72,6 @@ which keeps the number of page erases low.
 ---
 
 ## `AXX.CFG` format
-
 ```
 # AxxSolder settings
 # key=value, one per line, '#' starts a comment
@@ -108,6 +110,57 @@ matches the settings menu order:
 `power_limit_No_name`, `display_graph`, `delta_t_detection`, `standby_delay`,
 `show_profile_on_tip_change`, `change_enc_dir`, `encoder_step_idx`,
 `heat_at_startup`.
+
+---
+
+## Tip profiles: `P01.CFG` … `Pnn.CFG`
+
+Every tip profile is its own small file, `/P01.CFG`, `/P02.CFG`, … in the same
+order as in the profiles menu. The files are contiguous: the import stops at the
+first file that is missing or contains no keys, so the firmware writes a
+header-only file right after the last profile instead of deleting stale files.
+
+```
+# AxxSolder tip profile
+version=1
+name=Default
+handle=T245
+default=1
+kp=8.00
+ki=2.00
+kd=0.50
+max_i=300.00
+power_limit=0.00
+temp_cal_100=100.00
+temp_cal_200=200.00
+temp_cal_300=300.00
+temp_cal_350=350.00
+temp_cal_400=400.00
+temp_cal_450=450.00
+```
+
+- `handle` is `NT115`, `T210`, `T245` or `No_name`.
+- `name` is the display name shown in the menu (max 23 characters).
+- `power_limit` is in watts, `0` = no profile limit.
+- Values are clamped on import (kp/ki/kd 0…100, max_i 0…1000, power_limit
+  0…MAX_POWER, calibration points 0…600).
+
+`/ACTIVE.CFG` stores which profile is active per handle type:
+
+```
+# active profile index per handle, -1 = none
+nt115=0
+t210=-1
+t245=1
+no_name=-1
+```
+
+`-1` (or `255`) means "no profile active"; indexes are validated against the
+number of imported profiles. All profiles are written to flash with a single
+`tip_profiles_save()` after a successful import.
+
+The volume is 18 KB (36 sectors, 30 clusters of 512 B, 64 root entries), which
+fits 24 profiles plus `AXX.CFG` and the metadata files a host may create.
 
 ---
 

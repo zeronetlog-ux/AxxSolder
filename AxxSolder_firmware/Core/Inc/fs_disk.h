@@ -7,7 +7,7 @@
 
 /* FatFS disk I/O layer for the "FS" flash region (see the linker script).
  *
- * The volume is 8 KB: 16 sectors x 512 B. One 2 KB flash page is cached so a
+ * The volume is 18 KB: 36 sectors x 512 B. One 2 KB flash page is cached so a
  * sector write becomes a read-modify-write of a whole page (flash can only be
  * erased page-wise). Used both by FatFS itself and by the USB MSC class. */
 

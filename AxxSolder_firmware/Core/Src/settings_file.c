@@ -62,6 +62,10 @@ static const SettingsFileField field_table[] = {
 
 #define FIELD_COUNT (sizeof(field_table) / sizeof(field_table[0]))
 
+/* Guard: every Flash_values field must have a key in the file. */
+_Static_assert(FIELD_COUNT == sizeof(Flash_values) / sizeof(float),
+               "AXX.CFG is missing a Flash_values field");
+
 /* Set when a parsed value differs from the current one - avoids rewriting the
  * settings page when the host only rewrites the same content. */
 static bool settings_changed;
@@ -72,7 +76,7 @@ static bool settings_changed;
 
 /* Float -> "[-]123.45". printf("%f") is not available: the project links with
  * --specs=nano.specs and without -u _printf_float. */
-static void format_float(char *out, uint16_t len, float value)
+void settings_file_fmt_float(char *out, uint16_t len, float value)
 {
     bool     negative = (value < 0.0f);
     float    absolute = negative ? -value : value;
@@ -121,7 +125,7 @@ static const char *skip_spaces(const char *s)
 }
 
 /* Minimal unsigned parser - avoids pulling strtoul/strtod into the image. */
-static bool parse_uint(const char *s, unsigned long *out)
+bool settings_file_parse_uint(const char *s, unsigned long *out)
 {
     unsigned long value = 0;
     bool          any   = false;
@@ -138,7 +142,7 @@ static bool parse_uint(const char *s, unsigned long *out)
 
 /* Minimal float parser: [-]digits[.digits] - the settings file never contains
  * exponents and strtof() would add several kilobytes of soft-float code. */
-static bool parse_float(const char *s, float *out)
+bool settings_file_parse_float(const char *s, float *out)
 {
     bool     negative = false;
     float    value    = 0.0f;
@@ -206,7 +210,7 @@ static int8_t apply_line(char *line, uint16_t len, uint8_t *version)
     if ((key_len == 7) && (strncmp(start, "version", 7) == 0)) {
         unsigned long file_version = 0;
 
-        if (!parse_uint(value_str, &file_version) || (file_version > SETTINGS_FILE_VERSION)) {
+        if (!settings_file_parse_uint(value_str, &file_version) || (file_version > SETTINGS_FILE_VERSION)) {
             return -1;
         }
         *version = (uint8_t)file_version;
@@ -219,7 +223,7 @@ static int8_t apply_line(char *line, uint16_t len, uint8_t *version)
     }
 
     float parsed = 0.0f;
-    if (!parse_float(value_str, &parsed)) {
+    if (!settings_file_parse_float(value_str, &parsed)) {
         return 0;   /* not a number */
     }
 
@@ -263,7 +267,7 @@ FRESULT settings_file_export(void)
 
         memcpy(line, field_table[i].key, key_len);
         line[key_len] = '=';
-        format_float(&line[key_len + 1], (uint16_t)(sizeof(line) - key_len - 1), value);
+        settings_file_fmt_float(&line[key_len + 1], (uint16_t)(sizeof(line) - key_len - 1), value);
 
         size_t line_len = strlen(line);
         line[line_len++] = '\r';
