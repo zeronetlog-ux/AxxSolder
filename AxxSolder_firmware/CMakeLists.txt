@@ -68,6 +68,15 @@ if(STUSB_DEBUG)
     target_compile_definitions(${EXECUTABLE} PRIVATE "STUSB_DEBUG")
 endif()
 
+# Boot without touching the PD link at all: no soft reset, no capability read,
+# no contract request - the controller keeps the contract it negotiated from its
+# own NVM. Used to tell a source that dislikes the station's PD activity (a
+# laptop port, say) apart from one that dislikes the controller's own profile.
+option(PD_QUIET_BOOT "Boot without any USB-PD negotiation (diagnostic)" OFF)
+if(PD_QUIET_BOOT)
+    target_compile_definitions(${EXECUTABLE} PRIVATE "PD_CAPS_ATTEMPTS=0")
+endif()
+
 set(CPU_PARAMETERS ${CPU_PARAMETERS}
 	-mthumb
 	-mcpu=cortex-m4

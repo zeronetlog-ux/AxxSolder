@@ -11,6 +11,7 @@
 #   tools/build.sh                            # build into build/
 #   tools/build.sh --clean                    # drop build/ first
 #   tools/build.sh --debug                    # + USB-PD trace on USART1
+#   tools/build.sh --no-pd                    # boot without PD negotiation
 #   tools/build.sh --clean -DLCD_SIZE=240X240 # extra arguments go to cmake
 #   BUILD_DIR=out tools/build.sh              # custom build directory
 #
@@ -31,6 +32,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --clean) CLEAN=1; shift ;;
         --debug) CMAKE_ARGS="$CMAKE_ARGS -DSTUSB_DEBUG=ON"; shift ;;
+        --no-pd) CMAKE_ARGS="$CMAKE_ARGS -DPD_QUIET_BOOT=ON"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) break ;;
     esac
