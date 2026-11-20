@@ -381,6 +381,7 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma, stusb_dpm_trac
 	return STUSB_CONTRACT_TIMEOUT;
 }
 
+#ifdef STUSB_DEBUG
 HAL_StatusTypeDef stusb_nvm_read(uint8_t *out)
 {
 	uint8_t value;
@@ -456,6 +457,7 @@ HAL_StatusTypeDef stusb_nvm_read(uint8_t *out)
 
 	return (sector == STUSB_NVM_SECTORS) ? HAL_OK : HAL_ERROR;
 }
+#endif /* STUSB_DEBUG */
 
 void stusb_read_cable(stusb_cable_t *cable)
 {

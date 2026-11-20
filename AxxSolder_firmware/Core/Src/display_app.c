@@ -630,7 +630,13 @@ void LCD_draw_earth_fault_popup(void) {
 /* USB-PD source banner (boot)                                        */
 /* ------------------------------------------------------------------ */
 
-/* ---- NVM settings dump (diagnostic build only) ----
+/* The two screens below are diagnostics: they are compiled into STUSB_DEBUG
+ * builds only (tools/build.sh --debug), so a release image carries neither the
+ * strings nor the code. */
+
+#ifdef STUSB_DEBUG
+
+/* ---- NVM settings dump ----
  *
  * The controller negotiates its first contract from its own NVM before the MCU
  * is up, so these bytes explain what a source sees at plug-in. Layout follows
@@ -753,6 +759,8 @@ void LCD_show_nvm_dump(const uint8_t *nvm)
         y = (uint16_t)(y + 18u);
     }
 }
+
+#endif /* STUSB_DEBUG */
 
 /* ---- USB-PD boot banner / mode chooser ---- */
 

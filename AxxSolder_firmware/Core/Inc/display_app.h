@@ -53,14 +53,19 @@ void LCD_draw_earth_fault_popup(void);
  * main() right after power_source_init(). */
 int8_t LCD_run_pd_banner(void);
 
-/* Diagnostic screen: what was requested from the source, what the controller
- * reports back, and what the heater limit became. `rdo_raw` is the word read
- * from REG_RDO_REG_STATUS; the decoded fields next to it come from the RDO
- * union, so a mismatch between the two shows a broken register layout.
- * Drawn by STUSB_DEBUG builds only. */
+/* Diagnostic screens for the USB-PD path, compiled into STUSB_DEBUG builds
+ * (tools/build.sh --debug) only.
+ *
+ *   LCD_show_pd_apply(): what was requested, the measured voltage, the raw RDO
+ *       word with its decoded fields and the resulting power limit
+ *   LCD_show_nvm_dump(): the controller's own NVM settings
+ */
+#ifdef STUSB_DEBUG
 void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
                        uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a,
                        float contract, float limit, const stusb_dpm_trace_t *trace);
+void LCD_show_nvm_dump(const uint8_t *nvm);
+#endif
 
 /* Idle time after which the chooser closes on its own (ms). Any encoder
  * movement or button press restarts the countdown; only a button press changes
