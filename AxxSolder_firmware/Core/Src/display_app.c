@@ -66,9 +66,11 @@ static void format_power_source(char *buf, size_t len)
             /* Only the USB default (5 V) contract is in force: the source's
              * capability list could not be read (see stusb4500.h). */
             (void)snprintf(buf, len, "PD?R");
-        } else if ((sensor_values.USB_PD_power_limit > 0.0f) &&
-                   (sensor_values.USB_PD_power_limit < 1000.0f)) {
-            (void)snprintf(buf, len, "PD %dW", (int)(sensor_values.USB_PD_power_limit + 0.5f));
+        } else if ((sensor_values.USB_PD_contract_power > 0.0f) &&
+                   (sensor_values.USB_PD_contract_power < 1000.0f)) {
+            /* What the source granted - the heater budget is slightly lower,
+             * the difference stays inside the firmware. */
+            (void)snprintf(buf, len, "PD %dW", (int)(sensor_values.USB_PD_contract_power + 0.5f));
         } else {
             (void)snprintf(buf, len, "PD");
         }
@@ -657,8 +659,8 @@ static void nvm_hex_line(char *out, size_t len, uint8_t tag, const uint8_t *data
 }
 
 void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
-                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a, float limit,
-                       const stusb_dpm_trace_t *trace)
+                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a,
+                       float contract, float limit, const stusb_dpm_trace_t *trace)
 {
     char     line[40];
     uint16_t y = 34;
@@ -702,7 +704,8 @@ void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
     LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
 
     y = (uint16_t)(y + 20u);
-    (void)snprintf(line, sizeof(line), "limit %uW", (unsigned)(int)(limit + 0.5f));
+    (void)snprintf(line, sizeof(line), "%uW tip %uW",
+                   (unsigned)(int)(contract + 0.5f), (unsigned)(int)(limit + 0.5f));
     LCD_PutStr(8, y, line, FONT_arial_12X15, C_Header, C_Background);
 }
 

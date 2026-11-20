@@ -56,7 +56,8 @@ typedef struct {
     mainstates current_state;
     mainstates previous_state;
     float max_power_watt;
-    float USB_PD_power_limit;
+    float USB_PD_power_limit;     /* heater budget (contract minus the station) */
+    float USB_PD_contract_power;  /* what the source granted, for the UI       */
 } sensor_values_struct;
 /* Global variable, defined in main.c */
 extern volatile sensor_values_struct sensor_values;

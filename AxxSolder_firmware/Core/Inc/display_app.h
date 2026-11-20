@@ -59,8 +59,8 @@ int8_t LCD_run_pd_banner(void);
  * union, so a mismatch between the two shows a broken register layout.
  * Drawn by STUSB_DEBUG builds only. */
 void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
-                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a, float limit,
-                       const stusb_dpm_trace_t *trace);
+                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a,
+                       float contract, float limit, const stusb_dpm_trace_t *trace);
 
 /* Idle time after which the chooser closes on its own (ms). Any encoder
  * movement or button press restarts the countdown; only a button press changes

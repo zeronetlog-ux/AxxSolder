@@ -90,6 +90,7 @@ struct sensor_values_struct {
 	mainstates previous_state;
 	float max_power_watt;
 	float USB_PD_power_limit;
+	float USB_PD_contract_power;
 };
 
 /* Struct to hold sensor values */
@@ -110,7 +111,8 @@ volatile sensor_values_struct sensor_values = {
     .current_state = SLEEP,
     .previous_state = SLEEP,
     .max_power_watt = 0.0f,
-    .USB_PD_power_limit = FLT_MAX
+    .USB_PD_power_limit = FLT_MAX,
+    .USB_PD_contract_power = 0.0f
 };
 /* USER CODE END PTD */
 

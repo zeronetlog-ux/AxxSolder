@@ -134,8 +134,12 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo,
 		heater_w = 0.0f;
 	}
 
-	sensor_values.USB_PD_power_limit = heater_w;
+	/* The UI reports what the source granted ("PD 30W"); the heater gets that
+	 * minus the station's own supply, which stays inside the firmware. */
+	sensor_values.USB_PD_contract_power = contract_w;
+	sensor_values.USB_PD_power_limit    = heater_w;
 
+	debug_print_int(DEBUG_INFO,"USB-PD contract (W)", (int)sensor_values.USB_PD_contract_power);
 	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)sensor_values.USB_PD_power_limit);
 
 #ifdef STUSB_DEBUG
@@ -146,6 +150,7 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo,
 	                  (uint8_t)rdo->b.Object_Pos,
 	                  (float)rdo->b.MaxCurrent * 0.01f,
 	                  (float)rdo->b.OperatingCurrent * 0.01f,
+	                  sensor_values.USB_PD_contract_power,
 	                  sensor_values.USB_PD_power_limit, trace);
 	HAL_Delay(8000);
 #endif
