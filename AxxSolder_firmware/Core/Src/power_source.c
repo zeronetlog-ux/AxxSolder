@@ -8,11 +8,13 @@
 #include <stdbool.h>
 #include <math.h>        /* fabsf */
 
-/* USB-PD power limit safety margin. The negotiated contract (measured bus
- * voltage x negotiated current) is multiplied by this factor to produce the
- * value we actually allow the heater to draw, giving headroom for inrush and
- * cable losses. Set to 1.0 = "trust the contract's number." */
-#define USB_PD_POWER_REDUCTION_FACTOR 1.0f
+/* The station itself draws current from the same contract as the heater (MCU,
+ * display, gate driver). Letting the heater use the full contract current means
+ * the port sees more than it granted - which is what happens at a 5 V contract,
+ * where ~15 W of tip power is already the whole 3 A and the logic comes on top.
+ * Subtracting a small fixed current keeps that headroom and, unlike a blanket
+ * percentage, costs almost nothing at 20 V. */
+#define STATION_AUX_CURRENT_A 0.15f
 
 /* Where the supply profiles come from.
  *
@@ -75,7 +77,8 @@ static bool wait_for_sink_ready(uint32_t timeout_ms){
 }
 
 /* Adopt the given contract: source = USB-PD, and the heater power limit becomes
- * the measured bus voltage times the negotiated operating current. */
+ * the measured bus voltage times the negotiated operating current minus the
+ * current the station itself needs. */
 static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo){
 	power_source = POWER_USB;
 	pd_status    = PD_STATUS_OK;
@@ -86,8 +89,13 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo){
 	sensors_get_bus_voltage();
 
 	float current_a = rdo->b.OperatingCurrent * 0.01f;   /* 10 mA units -> A */
-	sensor_values.USB_PD_power_limit =
-		sensor_values.bus_voltage * current_a * USB_PD_POWER_REDUCTION_FACTOR;
+	float heater_a  = current_a - STATION_AUX_CURRENT_A;
+
+	if(heater_a < 0.0f){
+		heater_a = 0.0f;
+	}
+
+	sensor_values.USB_PD_power_limit = sensor_values.bus_voltage * heater_a;
 
 	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)sensor_values.USB_PD_power_limit);
 }
