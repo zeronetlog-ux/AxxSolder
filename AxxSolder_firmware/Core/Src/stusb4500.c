@@ -20,6 +20,10 @@ uint8_t stusb_chip_id;
 /* Window for Accept/Reject/PS_RDY after a renegotiation was started. */
 #define STUSB_CONTRACT_TIMEOUT_MS 600u
 
+/* The RDO register follows PS_RDY by a few milliseconds; give it this long to
+ * report the new object position before calling the request rejected. */
+#define STUSB_CONTRACT_SETTLE_MS  500u
+
 static HAL_StatusTypeDef stusb_read_register(uint8_t reg, uint8_t *data, uint8_t len)
 {
   return HAL_I2C_Mem_Read(&hi2c1, (STUSB4500_ADDR << 1), reg, I2C_MEMADD_SIZE_8BIT, data, len, STUSB_I2C_TIMEOUT_MS);
@@ -327,14 +331,23 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
 	}
 
 	/* The RDO names the source PDO the link settled on; a 5 V request has to
-	 * land on PDO1, anything higher on our PDO2, and 0 means no contract. */
-	if ((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos != number)) {
-		stusb_log("contract settled elsewhere\n");
-		return STUSB_CONTRACT_REJECTED;
-	}
+	 * land on PDO1, anything higher on our PDO2, and 0 means no contract. The
+	 * register lags the PS_RDY by a few milliseconds, so poll it briefly instead
+	 * of reading once. */
+	deadline = HAL_GetTick() + STUSB_CONTRACT_SETTLE_MS;
+	do {
+		if (stusb_read_rdo(&rdo) != HAL_OK) {
+			return STUSB_CONTRACT_TIMEOUT;
+		}
+		if (rdo.b.Object_Pos == number) {
+			stusb_log("contract ok\n");
+			return STUSB_CONTRACT_OK;
+		}
+		HAL_Delay(10);
+	} while (HAL_GetTick() < deadline);
 
-	stusb_log("contract ok\n");
-	return STUSB_CONTRACT_OK;
+	stusb_log("contract settled elsewhere\n");
+	return STUSB_CONTRACT_REJECTED;
 }
 
 HAL_StatusTypeDef stusb_nvm_read(uint8_t *out)

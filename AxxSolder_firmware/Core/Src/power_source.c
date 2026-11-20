@@ -60,15 +60,37 @@ uint8_t    pd_offer_selected = PD_OFFER_NONE;
  * must NOT sample right away (that reads the stale, lower voltage). Wait a fixed
  * minimum for the transition to begin, then poll the instantaneous bus voltage
  * until it has held steady. */
-static void wait_for_vbus_settle(void){
-	HAL_Delay(300);                 /* let the old contract tear down & VBUS start ramping */
-	float v_prev = sensors_read_bus_voltage_instant();
-	uint8_t stable_ticks = 0;
-	uint32_t settle_timeout = HAL_GetTick() + 2000;
+/* Wait for VBUS to reach `target_v` (up to 1.5 s) and then to hold steady for
+ * ~150 ms. Call with target_v = 0 to wait for stability only.
+ *
+ * The target matters: a source answers PS_RDY before VBUS has actually moved, so
+ * "the voltage stopped changing" is true on the OLD value for a while. Reading
+ * the contract then describes the previous mode - that is how a 15 V/2 A
+ * contract ended up reported as 17 W (20 V x the old 1 A). */
+static void wait_for_vbus_settle(float target_v){
+	uint32_t deadline = HAL_GetTick() + 1500;
+	float    v_prev;
+	uint8_t  stable_ticks = 0;
+	uint32_t settle_timeout;
+
+	if(target_v > 0.0f){
+		while(HAL_GetTick() < deadline){
+			if(fabsf(sensors_read_bus_voltage_instant() - target_v) < 0.5f){
+				break;
+			}
+			HAL_Delay(20);
+		}
+	}
+	else{
+		HAL_Delay(300);            /* let the old contract tear down */
+	}
+
+	v_prev = sensors_read_bus_voltage_instant();
+	settle_timeout = HAL_GetTick() + 2000;
 	while(HAL_GetTick() < settle_timeout){
 		HAL_Delay(50);
 		float v_now = sensors_read_bus_voltage_instant();
-		stable_ticks = (fabsf(v_now - v_prev) < 0.2f) ? (stable_ticks + 1) : 0;
+		stable_ticks = (fabsf(v_now - v_prev) < 0.2f) ? (uint8_t)(stable_ticks + 1u) : 0u;
 		v_prev = v_now;
 		if(stable_ticks >= 3){ break; }   /* steady for ~150 ms => settled */
 	}
@@ -172,11 +194,14 @@ static bool request_offer(uint8_t index){
 		return false;          /* rejected or no answer: the link stays at 5 V */
 	}
 
+	/* Let the source actually move before the contract is read - PS_RDY arrives
+	 * while VBUS is still on the old value (see wait_for_vbus_settle()). */
+	wait_for_vbus_settle((float)pd_offers[index].mv / 1000.0f);
+
 	if(stusb_read_rdo(&rdo) != HAL_OK){
 		return false;
 	}
 
-	wait_for_vbus_settle();
 	apply_contract(&rdo);
 	pd_offer_selected = index;
 
@@ -289,7 +314,7 @@ void power_source_init(void){
 	}
 
 	/* Let VBUS settle at the negotiated voltage before measuring it. */
-	wait_for_vbus_settle();
+	wait_for_vbus_settle(0.0f);
 	apply_contract(&rdo);
 
 	if(caps_unreadable){
