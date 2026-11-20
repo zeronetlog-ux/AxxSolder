@@ -4,6 +4,7 @@
 [Dd]ebug
 .launch
 build/
+build-*/
 .vscode/
 .clangd
 .cache/

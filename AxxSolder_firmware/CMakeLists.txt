@@ -60,6 +60,14 @@ target_compile_definitions(${EXECUTABLE} PRIVATE
     "USE_USB_DOUBLE_BUFFER=0"
 )
 
+# USB-PD diagnostics: trace the STUSB4500 exchange on USART1 (256000 baud).
+# Enabled with `tools/build.sh --debug`; release builds leave it off, which
+# also compiles the debug strings out.
+option(STUSB_DEBUG "Log the USB-PD exchange on USART1" OFF)
+if(STUSB_DEBUG)
+    target_compile_definitions(${EXECUTABLE} PRIVATE "STUSB_DEBUG")
+endif()
+
 set(CPU_PARAMETERS ${CPU_PARAMETERS}
 	-mthumb
 	-mcpu=cortex-m4
