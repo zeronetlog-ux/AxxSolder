@@ -2,6 +2,13 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 <a href='https://ko-fi.com/axxaxx' target='_blank'><img height='35' style='border:0px;height:20px;' src='https://github.com/AxxAxx/kofi-button/blob/main/Ko-fi_Buy-me-a-coffee_button.png?raw=true' border='0' alt='Donate' />  
 
+> **Fork.** This repository is a fork of [AxxAxx/AxxSolder](https://github.com/AxxAxx/AxxSolder).
+> The PCB, the enclosure, the BOM and the overall firmware design are upstream's work;
+> what this fork changes is listed under [Changes in this fork](#changes-in-this-fork) -
+> mainly the USB-PD path and command-line build/flash tooling. Hardware and support
+> questions belong upstream, and that section is worth reading before assuming upstream
+> behaviour.
+
 Interested in purchasing an AxxSolder 3.2?  
 On my website [5Dimensions](https://www.5dimensions.se/) you can purchase assembled and tested AxxSolder 3.2 boards with connectors and hardware.  
 
@@ -21,6 +28,7 @@ Please use [Discord](https://discord.gg/AwpHEmsyKj) for build related and genera
 # Table of Contents
 - [AxxSolder Overview](#axxsolder-overview)
 - [Questions and support](#questions-and-support)
+- [Changes in this fork](#changes-in-this-fork)
 - [Features](#features)
 - [DEMO](#demo)
 - [GRAPHING](#graphing)
@@ -43,13 +51,90 @@ Please use [Discord](https://discord.gg/AwpHEmsyKj) for build related and genera
 - [Current measurement](#current-measurement)
 - [Disclaimer](#disclaimer)
 
+# Changes in this fork
+Everything here is relative to upstream's `main`. The board, the enclosure and the
+rest of the firmware are untouched.
+
+## USB-PD: the source's capabilities are read, not probed
+Upstream discovered the supply grid by asking: for every PD voltage it requested
+the highest current the charger would accept. That took seconds, re-negotiated
+the contract a dozen times and only produced an upper bound (15 V/2.66 A and
+20 V/2 A were rounded to rungs of a hand-written current table).
+
+The STUSB4500 does report what the source offers - the received
+`Source_Capabilities` sits in its RX buffer, and a PD soft reset makes the
+charger repeat it. This fork reads that message (validating `RX_BYTE_CNT`
+against the object count) and uses the fixed PDOs exactly as advertised:
+
+- boot-time negotiation went from ~3.5 s of probing to one exchange (~0.5 s);
+- the list on screen shows the source's own voltages and currents; equal powers
+  are ordered by voltage, so it reads 20/15/12/9/5;
+- the mode picked in the list now reaches the heater - the power limit is
+  recomputed after the change (upstream only did that at boot);
+- a contract is accepted only if the source answered `Accept`/`PS_RDY` and the
+  RDO reports a position, and the voltage is waited for before the contract is
+  measured, so a mode change no longer reports the previous mode's numbers.
+
+### 5 V sources are left alone
+The controller negotiates a contract from its own NVM as soon as the cable is
+plugged in, before the firmware runs, so the bus voltage says what is attached:
+above 5 V it is a supply that speaks PD and has headroom to gain, at 5 V it is a
+plain 5 V source or a laptop port. Touching the link during boot makes the latter
+restart the station in a loop - a MacBook's USB-C port does, while the same
+station behind a USB hub (which does no PD at all) never did. So at 5 V nothing
+is written and nothing is reset: the contract the controller negotiated stands,
+and only the power limit is derived from it.
+
+A 5 V mode is negotiated through PDO1, whose voltage the specification fixes,
+with the current taken from the source's own PDO. Upstream programmed a second
+5 V PDO and treated the resulting contract as a rejection, so choosing "run on
+5 V" silently fell back to a stale 20 V profile.
+
+### Power limit and display
+The heater budget is the granted contract minus about 1 W for the station itself
+(MCU, display, gate driver) - the port sees the heater plus that supply, so the
+margin keeps the draw inside the contract, which matters most at 5 V where the
+input current is the scarce resource. The info line shows the granted contract
+power (`PD 30W`); the margin is internal. `PD?R` next to the input voltage means
+the station runs on the controller's NVM contract because the capability list
+could not be read.
+
+## Building and flashing from the command line
+`AxxSolder_firmware/tools/build.sh` finds the arm-none-eabi toolchain by itself
+(`ARM_TOOLCHAIN_BIN`, `PATH`, STM32CubeCLT, the compiler bundled with
+STM32CubeIDE - newest wins), refuses a cmake older than the 3.29 the project
+asks for and forwards extra arguments to cmake. `--clean`, `BUILD_DIR=...`,
+`--debug` (USB-PD trace on USART1, 256000 8N1) and `--no-pd` (boot without
+touching the PD link, for diagnostics) are supported.
+
+`AxxSolder_firmware/tools/flash_dfu.sh` wraps the DFU update described below:
+`--wait N` catches the board while it is being plugged in, `FLASHER=dfu|cli`
+forces one flasher and the STM32CubeProgrammer CLI bundled with STM32CubeIDE is
+found automatically. Note that dfu-util's DFU page erase is unreliable on this
+board (it aborts with `ERASE_PAGE`/`SET_ADDRESS` errors); the CubeProgrammer path
+completes.
+
+`AxxSolder_firmware/tools/pd_test/run.sh` checks the STUSB4500 register decoding
+(PD message header, PDO units, RDO fields) on the host - no toolchain and no
+hardware needed, same idea as `tools/fs_test`.
+
+## Firmware internals
+- `stusb4500_regs.h` holds the register map and the PD word layouts as shifts and
+  masks; the duplicated macros and the dead RX-buffer code (`poll_source()`,
+  `read_pdo_objects()`, `debug_print_pdos()`, ...) are gone.
+- Alerts are cleared with a 12-byte read of `0x0B` and masked to what the sink
+  reacts to. The chip keeps its state across an MCU reset (it is powered from
+  VBUS), so a stale `PRT_STATUS_AL` used to hide the first PD message.
+- `stusb_nvm_read()` reads the controller's own NVM settings (5 x 8 bytes) - that
+  is the profile it negotiates from before the firmware runs.
+
 # Features
 - The tip temperature is set by a rotary encoder. Pressing the encoder puts AxxSolder into Sleep mode and heating is turned off, press again to wake up.  
 - AxxSolder is capable of driving C115, C210 and C245 style cartridges from JBC. With two handle sense inputs AxxSolder can determine if the connected handle is either a NT115, T210 or T245 and adjust max output power accordingly. The max output power is software limited to 130 W for T245, 65 W for T210 and 22 W for NT115 handles.
 - When the handle is put into the stand (connected to Stand_sense) AxxSolder goes into "Standby mode". On the portable version an aluminium plate is mounted in the case and allows the AxxSolder to go into Standby mode when the cartridge or handle rests against it. After 10 min in Standby mode AxxSolder goes into "Sleep mode" and heating is completely turned off. This is similar to what JBC calls [Sleep and Hibernation](https://www.jbctools.com/intelligent-heat-management.html).  
 - If AxxSolder is left in normal running mode for longer than 30 min, the station automatically goes into sleep mode after 30 min as a safety feature.  
 - Should the temperature ever go higher than 490 °C overheating is detected and the station goes into sleep mode in order to protect the tip.
-- At start-up any USB-PD source is detected and its capabilities are read: a PD soft reset makes the charger repeat its `Source_Capabilities` message, and the firmware takes the fixed PDOs (voltage and current) straight from it - no probing of voltages and currents is involved. When the message cannot be read the station keeps the controller's default 5 V contract instead of losing power (the info line then shows `PD?R`). The advertised modes are listed on screen, the most powerful one is negotiated, and the iron output power is limited to that contract automatically. Turn the knob during the list to run on another mode and press a button to remember the voltage (`pd_profile`); picking the topmost entry keeps the selection automatic.
+- USB-PD sources are read, not probed: the source's `Source_Capabilities` message is taken as it comes (a PD soft reset makes the charger repeat it), so the modes on screen are its own voltages and currents. Above 5 V the most powerful advertised mode is negotiated once and the iron output power is limited to that contract; a 5 V link (plain 5 V supply, USB hub, laptop port) is left exactly as the controller negotiated it, because renegotiating those restarts the station (see [Changes in this fork](#changes-in-this-fork)). Turn the knob during the list to run on another mode and press a button to remember the voltage (`pd_profile`); picking the topmost entry keeps the selection automatic.
 - The maximum power output is displayed at the top of the power bar graph.
 - User settings are stored in non-volatile flash and can be configured via a settings menu described in [SETTINGS](#settings). They can also be edited as a text file over USB, see [USB storage mode](#usb-storage-mode).
 - The two buttons are used to store temperature presets, e.g. 330 °C and 430 °C. Both preset temperatures are configurable in the settings menu. The stored preset temperature can be updated to the current set temperature by long-pressing the preset button.
@@ -193,14 +278,21 @@ dfu-util -a 0 -s 0x08000000:leave -D AxxSolder.bin
 or with the STM32CubeProgrammer CLI:
 
 ```sh
-STM32_Programmer_CLI -c port=USB1 -w AxxSolder.bin 0x08000000 -v -rst
+STM32_Programmer_CLI -c port=USB1 -w AxxSolder.bin 0x08000000 -v
 ```
 
-In this repository `AxxSolder_firmware/tools/flash_dfu.sh` wraps both tools:
-it picks the STM32 out of the connected DFU devices by its serial number and
-flashes `build/AxxSolder.bin`. Add `--erase-all` for a full chip erase (this
-also clears the stored settings, the tip profiles and the USB-storage FAT
-volume - all of them are re-created with defaults on the next boot).
+(`-rst` is deliberately absent: a reset is only available over SWD, the ROM
+bootloader ignores it and the CLI then exits with an error even though the write
+succeeded - power cycle the station instead.)
+
+In this repository `AxxSolder_firmware/tools/flash_dfu.sh` wraps both tools: it
+picks the STM32 out of the connected DFU devices by its serial number and flashes
+`build/AxxSolder.bin`. `--wait 60` keeps polling while the board is being plugged
+in, `FLASHER=cli` forces STM32CubeProgrammer (dfu-util's page erase aborts with
+`ERASE_PAGE`/`SET_ADDRESS` errors on this board) and `--erase-all` performs a full
+chip erase (this also clears the stored settings, the tip profiles and the
+USB-storage FAT volume - all of them are re-created with defaults on the next
+boot).
 
 Note that only the application region is written by a normal update, so the
 settings/profile pages and the FAT volume keep their content.
