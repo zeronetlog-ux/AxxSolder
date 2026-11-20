@@ -8,13 +8,14 @@
 #include <stdbool.h>
 #include <math.h>        /* fabsf */
 
-/* The station itself draws current from the same contract as the heater (MCU,
- * display, gate driver). Letting the heater use the full contract current means
- * the port sees more than it granted - which is what happens at a 5 V contract,
- * where ~15 W of tip power is already the whole 3 A and the logic comes on top.
- * Subtracting a small fixed current keeps that headroom and, unlike a blanket
- * percentage, costs almost nothing at 20 V. */
-#define STATION_AUX_CURRENT_A 0.15f
+/* The station itself draws power from the same contract as the heater (MCU,
+ * display, gate driver): roughly 1 W regardless of the bus voltage. Letting the
+ * heater use the whole contract means the port sees more than it granted - at a
+ * 5 V contract ~14 W of tip power is already most of 3 A and the logic comes on
+ * top. Subtracting a fixed power keeps the headroom in the right proportion:
+ * 1 W is ~50 mA at 20 V (a 30 W contract gives the tip 29 W) and 200 mA at 5 V,
+ * where input current, not power, is the scarce resource. */
+#define STATION_AUX_POWER_W 1.0f
 
 /* Where the supply profiles come from.
  *
@@ -126,14 +127,14 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo,
 	sensors_prime_bus_voltage();
 	sensors_get_bus_voltage();
 
-	float current_a = rdo->b.OperatingCurrent * 0.01f;   /* 10 mA units -> A */
-	float heater_a  = current_a - STATION_AUX_CURRENT_A;
+	float contract_w = sensor_values.bus_voltage * (rdo->b.OperatingCurrent * 0.01f);
+	float heater_w   = contract_w - STATION_AUX_POWER_W;
 
-	if(heater_a < 0.0f){
-		heater_a = 0.0f;
+	if(heater_w < 0.0f){
+		heater_w = 0.0f;
 	}
 
-	sensor_values.USB_PD_power_limit = sensor_values.bus_voltage * heater_a;
+	sensor_values.USB_PD_power_limit = heater_w;
 
 	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)sensor_values.USB_PD_power_limit);
 
@@ -185,13 +186,19 @@ static uint8_t discover_offers(void){
 		offers++;
 	}
 
-	/* Highest power first, so entry 0 is the automatic choice. */
+	/* Highest power first; on equal power the higher voltage goes first, so the
+	 * list reads 20/15/12/9/5 whatever order the source used. */
 	for(uint8_t i = 1; i < offers; i++){
 		pd_offer_t tmp = pd_offers[i];
 		uint32_t p = (uint32_t)tmp.mv * tmp.ma;
 		int8_t   j = (int8_t)(i - 1);
 
-		while((j >= 0) && (((uint32_t)pd_offers[j].mv * pd_offers[j].ma) < p)){
+		while(j >= 0){
+			uint32_t pj = (uint32_t)pd_offers[j].mv * pd_offers[j].ma;
+
+			if((pj > p) || ((pj == p) && (pd_offers[j].mv >= tmp.mv))){
+				break;
+			}
 			pd_offers[j + 1] = pd_offers[j];
 			j--;
 		}
