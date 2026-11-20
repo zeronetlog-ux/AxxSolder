@@ -656,6 +656,43 @@ static void nvm_hex_line(char *out, size_t len, uint8_t tag, const uint8_t *data
     }
 }
 
+void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
+                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a, float limit)
+{
+    char     line[40];
+    uint16_t y = 34;
+
+    UG_FillScreen(C_Background);
+    UG_FontSetTransparency(0);
+
+    LCD_PutStr(8, 8, "PD CONTRACT", FONT_arial_17X18, C_Header, C_Background);
+
+    (void)snprintf(line, sizeof(line), "req  %u.%02uV %u.%02uA",
+                   (unsigned)(int)req_v, (unsigned)((int)(req_v * 100.0f) % 100),
+                   (unsigned)(int)req_a, (unsigned)((int)(req_a * 100.0f) % 100));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+
+    y = (uint16_t)(y + 20u);
+    (void)snprintf(line, sizeof(line), "vbus %u.%02uV",
+                   (unsigned)(int)vbus, (unsigned)((int)(vbus * 100.0f) % 100));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+
+    y = (uint16_t)(y + 20u);
+    (void)snprintf(line, sizeof(line), "rdo  %08lX", (unsigned long)rdo_raw);
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Footer, C_Background);
+
+    y = (uint16_t)(y + 20u);
+    (void)snprintf(line, sizeof(line), "pos %u %u.%02u/%u.%02uA",
+                   (unsigned)rdo_pos,
+                   (unsigned)(int)rdo_max_a, (unsigned)((int)(rdo_max_a * 100.0f) % 100),
+                   (unsigned)(int)rdo_oper_a, (unsigned)((int)(rdo_oper_a * 100.0f) % 100));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+
+    y = (uint16_t)(y + 20u);
+    (void)snprintf(line, sizeof(line), "limit %uW", (unsigned)(int)(limit + 0.5f));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Header, C_Background);
+}
+
 void LCD_show_nvm_dump(const uint8_t *nvm)
 {
     const uint8_t *s3 = &nvm[3u * STUSB_NVM_SECTOR_SIZE];

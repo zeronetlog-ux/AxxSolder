@@ -52,11 +52,13 @@ void LCD_draw_earth_fault_popup(void);
  * main() right after power_source_init(). */
 int8_t LCD_run_pd_banner(void);
 
-/* Diagnostic screen: the STUSB4500 NVM settings (see stusb_nvm_read()).
- * `nvm` must hold STUSB_NVM_SECTORS * STUSB_NVM_SECTOR_SIZE bytes. Only drawn
- * by builds with STUSB_DEBUG, so a serial console is not needed to read the
- * controller configuration. */
-void LCD_show_nvm_dump(const uint8_t *nvm);
+/* Diagnostic screen: what was requested from the source, what the controller
+ * reports back, and what the heater limit became. `rdo_raw` is the word read
+ * from REG_RDO_REG_STATUS; the decoded fields next to it come from the RDO
+ * union, so a mismatch between the two shows a broken register layout.
+ * Drawn by STUSB_DEBUG builds only. */
+void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
+                       uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a, float limit);
 
 /* Idle time after which the chooser closes on its own (ms). Any encoder
  * movement or button press restarts the countdown; only a button press changes

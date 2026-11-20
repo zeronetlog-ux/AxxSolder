@@ -113,8 +113,10 @@ static bool wait_for_sink_ready(uint32_t timeout_ms){
 
 /* Adopt the given contract: source = USB-PD, and the heater power limit becomes
  * the measured bus voltage times the negotiated operating current minus the
- * current the station itself needs. */
-static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo){
+ * current the station itself needs. `req_mv`/`req_ma` are what was requested
+ * (0/0 when the controller's own contract simply stands). */
+static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo,
+                           uint16_t req_mv, uint16_t req_ma){
 	power_source = POWER_USB;
 	pd_status    = PD_STATUS_OK;
 
@@ -133,6 +135,18 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo){
 	sensor_values.USB_PD_power_limit = sensor_values.bus_voltage * heater_a;
 
 	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)sensor_values.USB_PD_power_limit);
+
+#ifdef STUSB_DEBUG
+	/* Diagnostic build: show what was asked for, what the controller reports and
+	 * what the limit became, so a wrong number can be traced without a console. */
+	LCD_show_pd_apply((float)req_mv / 1000.0f, (float)req_ma / 1000.0f,
+	                  sensor_values.bus_voltage, rdo->d32,
+	                  (uint8_t)rdo->b.Object_Pos,
+	                  (float)rdo->b.MaxCurrent * 0.01f,
+	                  (float)rdo->b.OperatingCurrent * 0.01f,
+	                  sensor_values.USB_PD_power_limit);
+	HAL_Delay(8000);
+#endif
 }
 
 /* Build pd_offers[] from the source's own capability list, highest power first.
@@ -202,7 +216,7 @@ static bool request_offer(uint8_t index){
 		return false;
 	}
 
-	apply_contract(&rdo);
+	apply_contract(&rdo, pd_offers[index].mv, pd_offers[index].ma);
 	pd_offer_selected = index;
 
 	debug_print_int(DEBUG_INFO,"PD profile mV", pd_offers[index].mv);
@@ -230,21 +244,6 @@ void power_source_init(void){
 		debug_print_str(DEBUG_INFO,"No USB-PD sink connected");
 		return;
 	}
-
-#ifdef STUSB_DEBUG
-	/* Diagnostic build: dump the controller's own NVM settings on the screen.
-	 * It negotiates its first contract from them before the MCU is up, so they
-	 * are what a source (a laptop port, for instance) sees at plug-in. Held long
-	 * enough to photograph, which avoids needing a serial console. */
-	{
-		uint8_t nvm[STUSB_NVM_SECTORS * STUSB_NVM_SECTOR_SIZE];
-
-		if(stusb_nvm_read(nvm) == HAL_OK){
-			LCD_show_nvm_dump(nvm);
-			HAL_Delay(8000);
-		}
-	}
-#endif
 
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
 	bool  caps_unreadable = false;
@@ -315,7 +314,7 @@ void power_source_init(void){
 
 	/* Let VBUS settle at the negotiated voltage before measuring it. */
 	wait_for_vbus_settle(0.0f);
-	apply_contract(&rdo);
+	apply_contract(&rdo, 0u, 0u);
 
 	if(caps_unreadable){
 		/* The 5 V contract is fine, only the capability list is missing - keep
