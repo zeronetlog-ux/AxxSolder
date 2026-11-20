@@ -45,8 +45,8 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 MEMORY
 {
   RAM      (xrw)    : ORIGIN = 0x20000000,   LENGTH = 32K
-  FLASH    (rx)     : ORIGIN = 0x8000000,    LENGTH = 110K
-  FS       (rw)     : ORIGIN = 0x0801B800,   LENGTH = 18K
+  FLASH    (rx)     : ORIGIN = 0x8000000,    LENGTH = 106K
+  FS       (rw)     : ORIGIN = 0x0801A800,   LENGTH = 18K
   PROFILES (rw)     : ORIGIN = 0x0801F000,   LENGTH = 2K
   SETTINGS (rw)     : ORIGIN = 0x0801F800,   LENGTH = 2K
 }
@@ -63,6 +63,9 @@ _efs = ORIGIN(FS) + LENGTH(FS);
 /* Sections */
 SECTIONS
 {
+  /* Guard: the FAT volume must end before the profile page. Getting this wrong
+   * would let the USB-storage volume overwrite the settings/profiles. */
+  ASSERT(_efs <= _sprofiles, "FS region overlaps the PROFILES page")
   /* The startup code into "FLASH" Rom type memory */
   .isr_vector :
   {
