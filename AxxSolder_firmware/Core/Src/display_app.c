@@ -61,8 +61,12 @@ static void format_power_source(char *buf, size_t len)
 {
     switch (power_source) {
     case POWER_USB:
-        if ((sensor_values.USB_PD_power_limit > 0.0f) &&
-            (sensor_values.USB_PD_power_limit < 1000.0f)) {
+        if (pd_status == PD_STATUS_NO_CAPS) {
+            /* Only the USB default (5 V) contract is in force: the source's
+             * capability list could not be read (see stusb4500.h). */
+            (void)snprintf(buf, len, "PD?R");
+        } else if ((sensor_values.USB_PD_power_limit > 0.0f) &&
+                   (sensor_values.USB_PD_power_limit < 1000.0f)) {
             (void)snprintf(buf, len, "PD %dW", (int)(sensor_values.USB_PD_power_limit + 0.5f));
         } else {
             (void)snprintf(buf, len, "PD");
@@ -622,72 +626,6 @@ void LCD_draw_earth_fault_popup(void) {
 /* ------------------------------------------------------------------ */
 /* USB-PD source banner (boot)                                        */
 /* ------------------------------------------------------------------ */
-
-/* ---- USB-PD probe status (boot) ---- */
-
-#define PD_PROBE_ROW_H 16
-
-/* First row of the per-voltage list, per orientation. */
-static uint16_t pd_probe_first_row_y(void)
-{
-    return (uint16_t)(((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 42 : 38);
-}
-
-/* Bottom hint line, per orientation. */
-static uint16_t pd_probe_hint_y(void)
-{
-    return (uint16_t)(((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 292 : 212);
-}
-
-/* Draw the probe screen: header plus one "..V  ..." row per voltage. */
-void LCD_show_pd_probe_start(const uint16_t *voltages_mv, uint8_t count)
-{
-    char     line[24];
-    uint16_t y = pd_probe_first_row_y();
-
-    UG_FillScreen(C_Background);
-    UG_FontSetTransparency(0);
-
-    LCD_PutStr(8, 8, "USB-PD PROBE", FONT_arial_17X18, C_Header, C_Background);
-
-    for (uint8_t i = 0; i < count; i++) {
-        (void)snprintf(line, sizeof(line), "%2uV  ...", (unsigned)(voltages_mv[i] / 1000u));
-        LCD_PutStr(8, (uint16_t)(y + (i * PD_PROBE_ROW_H)), line, FONT_arial_12X15, C_Footer, C_Background);
-    }
-
-    LCD_PutStr(8, pd_probe_hint_y(), "asking the charger...", FONT_arial_12X15, C_Footer, C_Background);
-}
-
-/* Fill in one row: the discovered mode, or "none" when the source has no PDO at
- * that voltage. */
-void LCD_show_pd_probe_result(uint8_t row, uint16_t mv, uint16_t ma)
-{
-    char     line[24];
-    uint16_t y = (uint16_t)(pd_probe_first_row_y() + (row * PD_PROBE_ROW_H));
-
-    if (ma == 0u) {
-        (void)snprintf(line, sizeof(line), "%2uV  none", (unsigned)(mv / 1000u));
-        LCD_PutStr(8, y, line, FONT_arial_12X15, C_Warning, C_Background);
-        return;
-    }
-
-    (void)snprintf(line, sizeof(line), "%2uV  %u.%02uA %3uW",
-                   (unsigned)(mv / 1000u),
-                   (unsigned)(ma / 1000u), (unsigned)((ma % 1000u) / 10u),
-                   (unsigned)((((uint32_t)mv * ma) + 500000u) / 1000000u));
-    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
-}
-
-/* Live feedback while a voltage/current combination is being requested. */
-void LCD_show_pd_probe_trying(uint16_t mv, uint16_t ma)
-{
-    char line[24];
-
-    (void)snprintf(line, sizeof(line), "trying %2u.%uV %u.%02uA",
-                   (unsigned)(mv / 1000u), (unsigned)((mv % 1000u) / 100u),
-                   (unsigned)(ma / 1000u), (unsigned)((ma % 1000u) / 10u));
-    LCD_PutStr(8, pd_probe_hint_y(), line, FONT_arial_12X15, C_Header, C_Background);
-}
 
 /* ---- USB-PD boot banner / mode chooser ---- */
 

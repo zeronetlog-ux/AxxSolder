@@ -115,8 +115,8 @@ matches the settings menu order:
 `pd_profile` is the USB-PD voltage the station prefers at start-up: `-1` picks
 the most powerful mode the source offers, any other value (e.g. `15`) prefers
 that voltage and falls back to the most powerful mode when the source has no PDO
-there. The list shown at boot is the discovered grid — voltage × highest current
-the charger accepted.
+there. The list shown at boot is the source's own capability list — the voltage
+and current it advertises for each of its PDOs.
 
 ---
 

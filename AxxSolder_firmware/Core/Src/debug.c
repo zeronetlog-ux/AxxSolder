@@ -8,6 +8,8 @@ extern UART_HandleTypeDef huart1;
  * via flash_values later). All debug_print_* functions check this before
  * doing the synchronous UART transmit. */
 DEBUG_VERBOSITY_t debugLevel = DEBUG_INFO;
+
+#ifdef DEBUG
 static char buffer[40];
 
 static const char *debug_level_str[] = {
@@ -16,6 +18,7 @@ static const char *debug_level_str[] = {
 	"[W]: ",
 	"[E]: ",
 };
+#endif
 
 
 HAL_StatusTypeDef debug_print_str(DEBUG_VERBOSITY_t verbosity, char * str){
@@ -49,25 +52,6 @@ HAL_StatusTypeDef debug_print_int_int(DEBUG_VERBOSITY_t verbosity, char * str, i
 		memset(buffer, '\0', sizeof(buffer));
 		sprintf(buffer, "%s %s %i %i\n", debug_level_str[verbosity], str, i, j);
 		ret = HAL_UART_Transmit(&huart1, (uint8_t *) buffer, (uint16_t)strlen(buffer),100);
-	}
-#endif
-	return ret;
-}
-
-HAL_StatusTypeDef debug_print_pdos(DEBUG_VERBOSITY_t verbosity, PDO_container_t *pdos){
-	HAL_StatusTypeDef ret = HAL_OK;
-#ifdef DEBUG
-	if(debugLevel > 0 && verbosity >= debugLevel){
-		char tx[256];
-		memset(tx, '\0', sizeof(tx));
-		for(int i = 0 ; i < pdos->numPDOs; i++){
-			memset(buffer, '\0', sizeof(buffer));
-			int current_int = pdos->pdos[i].current;
-			int voltage_int = pdos->pdos[i].voltage * 5;
-			sprintf(buffer, "%s PDO %i %d.%02dA %d.%02dV\n", debug_level_str[verbosity], i, current_int / 100, current_int % 100, voltage_int / 100, voltage_int % 100);
-			strcat(tx, buffer);
-		}
-		ret = HAL_UART_Transmit(&huart1, (uint8_t *) tx, (uint16_t)strlen(tx),100);
 	}
 #endif
 	return ret;

@@ -45,23 +45,12 @@ void show_popup(char *text);
  * Called from the ADC watchdog ISR via main.c's dispatcher. */
 void LCD_draw_earth_fault_popup(void);
 
-/* Boot-time USB-PD mode chooser: lists the modes discovered by
- * power_source_init(), lets the user pick one with the rotary encoder and
- * confirms with any button. Returns the chosen index into pd_offers[], or -1
- * when the source offered nothing. Called once from main() right after
- * power_source_init(). */
+/* Boot-time USB-PD mode chooser: lists the modes the source advertises (read
+ * from its Source_Capabilities by power_source_init()), lets the user pick one
+ * with the rotary encoder and confirms with any button. Returns the chosen index
+ * into pd_offers[], or -1 when the source offered nothing. Called once from
+ * main() right after power_source_init(). */
 int8_t LCD_run_pd_banner(void);
-
-/* Boot-time progress display for the USB-PD probe (shown while
- * power_source_init() asks the source for each voltage/current combination).
- *
- *   LCD_show_pd_probe_start(): draws the header and one row per voltage
- *   LCD_show_pd_probe_result(): fills in the row with the discovered current
- *   LCD_show_pd_probe_trying(): live "trying ..." line at the bottom
- */
-void LCD_show_pd_probe_start(const uint16_t *voltages_mv, uint8_t count);
-void LCD_show_pd_probe_result(uint8_t row, uint16_t mv, uint16_t ma);
-void LCD_show_pd_probe_trying(uint16_t mv, uint16_t ma);
 
 /* Idle time after which the chooser closes on its own (ms). Any encoder
  * movement or button press restarts the countdown; only a button press changes

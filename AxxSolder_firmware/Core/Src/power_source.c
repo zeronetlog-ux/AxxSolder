@@ -3,7 +3,6 @@
 #include "stusb4500.h"
 #include "sensors.h"     /* sensors_get_bus_voltage */
 #include "settings.h"    /* flash_values.pd_profile */
-#include "display_app.h" /* boot-time probe status screen */
 #include "debug.h"
 #include <stdbool.h>
 #include <math.h>        /* fabsf */
@@ -14,36 +13,19 @@
  * cable losses. Set to 1.0 = "trust the contract's number." */
 #define USB_PD_POWER_REDUCTION_FACTOR 1.0f
 
-/* USB-PD fixed-supply grid.
+/* Where the supply profiles come from.
  *
- * The STUSB4500 cannot report the source's Source_Capabilities (its message
- * buffer reads back empty and Get_Source_Cap is not answered), so the grid is
- * DISCOVERED by asking: a PDO2 request is only turned into a contract when the
- * source has a PDO at that voltage with at least that current, otherwise the
- * link falls back to PDO1 (5 V) - which is visible in the RDO.
+ * The STUSB4500 does expose the source's Source_Capabilities: a soft reset makes
+ * the source repeat them and the message lands in the chip's RX buffer (see
+ * stusb_read_source_pdos()). The offers are therefore taken from the source
+ * itself - no probing of voltage/current combinations.
  *
- * PD 2.0 fixed PDOs may only use 5/9/12/15/20 V, so those are the voltages to
- * probe (PDO1 = 5 V is always there and is our fallback). For every voltage the
- * maximum accepted current is searched: acceptance is monotonic in current (a
- * source either has a PDO at that voltage and accepts any current up to its
- * rating, or rejects everything), so the full rating is tried first, then the
- * smallest current to detect "no PDO at this voltage", then a binary search.
- *
- * The candidate currents are the values real PDO tables use (P/V for the usual
- * 27/36/40/45/60/65/87/90/100 W supplies), so e.g. 15 V/2.66 A or 20 V/2 A are
- * resolved exactly instead of being rounded to a 3 A rung. */
-static const uint16_t pd_probe_voltages_mv[] = { 20000, 15000, 12000, 9000 };
-#define PD_VOLTAGE_COUNT (sizeof(pd_probe_voltages_mv)/sizeof(pd_probe_voltages_mv[0]))
-
-static const uint16_t pd_probe_currents_ma[] = {
-	5000, 4500, 4000, 3500, 3250, 3000, 2750, 2660, 2500, 2250, 2220,
-	2000, 1750, 1670, 1500, 1250, 1000,  900,  750,  700,  500
-};
-#define PD_CURRENT_COUNT (sizeof(pd_probe_currents_ma)/sizeof(pd_probe_currents_ma[0]))
-
-/* Time to let a renegotiation settle before reading the RDO to learn whether
- * the requested PDO2 was accepted. */
-#define PD_RENEGOTIATE_SETTLE_MS 300
+ * When the message cannot be read the chip's own NVM contract (PDO1, 5 V) is
+ * left untouched, so the station keeps running on USB default power instead of
+ * losing VBUS.
+ */
+#define PD_CAPS_TRY_MS   120u  /* poll window after one soft reset             */
+#define PD_CAPS_ATTEMPTS 4u    /* soft resets before giving up                 */
 
 /* --- Public state --- */
 power_source_t power_source = POWER_DC;
@@ -54,15 +36,6 @@ uint8_t        pd_chip_id;
 pd_offer_t pd_offers[PD_OFFER_MAX];
 uint8_t    pd_offer_count;
 uint8_t    pd_offer_selected = PD_OFFER_NONE;
-
-/* Apply PDO1=5V/3A baseline only (valid count 1) and renegotiate. This is the
- * guaranteed-safe contract: the source can always meet 5 V, so the MCU stays
- * powered no matter what. Used as the starting point and the final fallback. */
-static void request_5v_baseline(void){
-	stusb_update_pdo(1, 5000, 3000);
-	stusb_set_valid_pdo(1);
-	stusb_soft_reset();
-}
 
 /* Wait for VBUS to ramp to the newly negotiated voltage and hold steady.
  *
@@ -118,68 +91,56 @@ static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo){
 	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)sensor_values.USB_PD_power_limit);
 }
 
-/* Ask the source for one (mV, mA) profile. Returns true when the contract was
- * formed at that voltage (RDO Object_Pos >= 2 means our PDO2 matched a source
- * PDO), false when the source refused and the link fell back to 5 V. */
-static bool probe_profile(uint16_t mv, uint16_t ma){
-	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
+/* Build pd_offers[] from the source's own capability list, highest power first.
+ * Returns the number of usable entries (0 = the list could not be read; the
+ * caller then falls back to the chip's NVM contract). */
+static uint8_t discover_offers(void){
+	stusb_pdo_t source[STUSB_SRC_PDO_MAX];
+	uint8_t     count = stusb_read_source_pdos(source, STUSB_SRC_PDO_MAX,
+	                                           PD_CAPS_TRY_MS, PD_CAPS_ATTEMPTS);
+	uint8_t     offers = 0;
 
-	LCD_show_pd_probe_trying(mv, ma);      /* live feedback on the boot screen */
+	debug_print_int(DEBUG_INFO,"PD source PDOs", count);
 
-	stusb_update_pdo(2, mv, ma);
-	stusb_set_valid_pdo(2);
-	stusb_soft_reset();
-	HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
+	for(uint8_t i = 0; i < count; i++){
+		/* 5 V is the minimum a fixed PDO may carry; anything below that is a
+		 * decoding artefact and is not worth negotiating. */
+		if((source[i].mv < 5000u) || (source[i].ma < 100u)){
+			continue;
+		}
 
-	if(stusb_read_rdo(&rdo) != HAL_OK){
-		return false;
+		pd_offers[offers].mv       = source[i].mv;
+		pd_offers[offers].ma       = source[i].ma;
+		pd_offers[offers].accepted = true;
+		offers++;
 	}
 
-	debug_print_int(DEBUG_INFO,"Probe mA", ma);
-	debug_print_int(DEBUG_INFO," -> Object_Pos", rdo.b.Object_Pos);
+	/* Highest power first, so entry 0 is the automatic choice. */
+	for(uint8_t i = 1; i < offers; i++){
+		pd_offer_t tmp = pd_offers[i];
+		uint32_t p = (uint32_t)tmp.mv * tmp.ma;
+		int8_t   j = (int8_t)(i - 1);
 
-	return (rdo.b.Object_Pos >= 2);
+		while((j >= 0) && (((uint32_t)pd_offers[j].mv * pd_offers[j].ma) < p)){
+			pd_offers[j + 1] = pd_offers[j];
+			j--;
+		}
+		pd_offers[j + 1] = tmp;
+	}
+
+	return offers;
 }
 
-/* Highest current the source accepts at `mv`; 0 when it has no PDO there.
- * Acceptance is monotonic in current, so: try the full rating first (one probe
- * for a 5 A supply), then the smallest current to detect "no PDO at this
- * voltage", then binary search the bracket. */
-static uint16_t probe_voltage(uint16_t mv){
-	if(probe_profile(mv, pd_probe_currents_ma[0])){
-		return pd_probe_currents_ma[0];
-	}
-	if(!probe_profile(mv, pd_probe_currents_ma[PD_CURRENT_COUNT - 1])){
-		return 0;                                   /* no PDO at this voltage */
-	}
-
-	uint8_t lo = 0;                                 /* known rejected, high I  */
-	uint8_t hi = PD_CURRENT_COUNT - 1;              /* known accepted, low I   */
-
-	while((uint8_t)(hi - lo) > 1u){
-		uint8_t mid = (uint8_t)(((uint16_t)lo + hi) / 2u);
-		if(probe_profile(mv, pd_probe_currents_ma[mid])){
-			hi = mid;
-		}
-		else{
-			lo = mid;
-		}
-	}
-
-	return pd_probe_currents_ma[hi];
-}
-
-/* Request one discovered profile and adopt the resulting contract. */
+/* Request one of the discovered profiles and adopt the resulting contract. */
 static bool request_offer(uint8_t index){
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
 
-	stusb_update_pdo(2, pd_offers[index].mv, pd_offers[index].ma);
-	stusb_set_valid_pdo(2);
-	stusb_soft_reset();
-	HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
+	if(stusb_request_contract(pd_offers[index].mv, pd_offers[index].ma) != STUSB_CONTRACT_OK){
+		return false;          /* rejected or no answer: the link stays at 5 V */
+	}
 
-	if((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos < 2)){
-		return false;          /* rejected: the link fell back to 5 V */
+	if(stusb_read_rdo(&rdo) != HAL_OK){
+		return false;
 	}
 
 	wait_for_vbus_settle();
@@ -213,10 +174,7 @@ void power_source_init(void){
 	}
 
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
-
-	/* Put the probe screen up immediately - the discovery below takes several
-	 * seconds and the panel would otherwise stay black until then. */
-	LCD_show_pd_probe_start(pd_probe_voltages_mv, (uint8_t)PD_VOLTAGE_COUNT);
+	bool caps_unreadable = false;
 
 	/* Wait for the chip to report a settled contract. Note the STUSB4500 keeps
 	 * its state across an MCU reset (it is powered from VBUS), so on a plain
@@ -224,71 +182,42 @@ void power_source_init(void){
 	(void)wait_for_sink_ready(1500);
 	HAL_Delay(100);                       /* let VBUS finish settling */
 
-	/* Discover the source's fixed-supply grid: for each PD voltage find the
-	 * highest current the charger accepts (see probe_voltage()). PDO1 (5 V) is
-	 * left untouched, so every rejected probe falls back to a safe 5 V contract
-	 * - no brown-out. This takes a few seconds (up to ~6 probes per voltage),
-	 * which is fine at boot and buys an exact picture of the supply. */
-	pd_offer_count = 0;
-
-	for(uint8_t v = 0; v < PD_VOLTAGE_COUNT; v++){
-		uint16_t mv = pd_probe_voltages_mv[v];
-		uint16_t ma = probe_voltage(mv);
-
-		LCD_show_pd_probe_result(v, mv, ma);
-
-		if(ma == 0u){
-			debug_print_int(DEBUG_INFO,"PD no PDO at mV", mv);
-			continue;
-		}
-
-		pd_offers[pd_offer_count].mv       = mv;
-		pd_offers[pd_offer_count].ma       = ma;
-		pd_offers[pd_offer_count].accepted = true;
-		pd_offer_count++;
-	}
-
-	/* Highest power first, so entry 0 is the automatic choice. */
-	for(uint8_t i = 1; i < pd_offer_count; i++){
-		pd_offer_t tmp = pd_offers[i];
-		uint32_t p = (uint32_t)tmp.mv * tmp.ma;
-		int8_t   j = (int8_t)(i - 1);
-
-		while((j >= 0) && (((uint32_t)pd_offers[j].mv * pd_offers[j].ma) < p)){
-			pd_offers[j + 1] = pd_offers[j];
-			j--;
-		}
-		pd_offers[j + 1] = tmp;
-	}
+	/* Read the source's own capability list. The soft reset inside needs the
+	 * settled contract above - before that the source may ignore it, which
+	 * would look like "capabilities unreadable". */
+	pd_offer_count   = discover_offers();
+	caps_unreadable  = (pd_offer_count == 0u);
 
 	/* Pick the profile to run on: the user's stored preference (a voltage) when
-	 * the source still offers it, otherwise the most powerful discovered one. */
-	uint8_t chosen = 0;
-	float   pref   = flash_values.pd_profile;
+	 * the source still offers it, otherwise the most powerful advertised one. */
+	if(pd_offer_count > 0u){
+		uint8_t chosen = 0;
+		float   pref   = flash_values.pd_profile;
 
-	if(pref > 0.0f){
-		for(uint8_t i = 0; i < pd_offer_count; i++){
-			if(fabsf(((float)pd_offers[i].mv / 1000.0f) - pref) < 0.6f){
-				chosen = i;
-				debug_print_str(DEBUG_INFO,"PD: using stored voltage");
-				break;
+		if(pref > 0.0f){
+			for(uint8_t i = 0; i < pd_offer_count; i++){
+				if(fabsf(((float)pd_offers[i].mv / 1000.0f) - pref) < 0.6f){
+					chosen = i;
+					debug_print_str(DEBUG_INFO,"PD: using stored voltage");
+					break;
+				}
 			}
 		}
-	}
 
-	if(pd_offer_count > 0u){
 		pd_offer_selected = chosen;
 		if(request_offer(chosen)){
 			return;                       /* contract adopted and applied */
 		}
 		debug_print_str(DEBUG_WARNING,"Chosen profile rejected - falling back");
 	}
+	else{
+		debug_print_str(DEBUG_WARNING,"PD capabilities unreadable");
+	}
 
-	/* Nothing usable: hold the guaranteed-safe 5 V baseline. */
+	/* Nothing selectable: keep the contract the chip negotiated on its own from
+	 * its NVM settings (PDO1, 5 V). Nothing is written to the DPM registers, so
+	 * VBUS never drops - only the power limit is derived from the RDO. */
 	pd_offer_selected = PD_OFFER_NONE;
-	debug_print_str(DEBUG_WARNING,"No high-power PDO accepted - holding 5V");
-	request_5v_baseline();
-	HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
 
 	if((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos == 0)){
 		pd_status = PD_STATUS_NO_CONTRACT;
@@ -299,6 +228,13 @@ void power_source_init(void){
 	/* Let VBUS settle at the negotiated voltage before measuring it. */
 	wait_for_vbus_settle();
 	apply_contract(&rdo);
+
+	if(caps_unreadable){
+		/* The 5 V contract is fine, only the capability list is missing - keep
+		 * that visible instead of letting apply_contract() report a clean OK
+		 * (the info line then shows "PD?R" next to the input voltage). */
+		pd_status = PD_STATUS_NO_CAPS;
+	}
 }
 
 /* Switch the link to one of the discovered profiles and recompute the power

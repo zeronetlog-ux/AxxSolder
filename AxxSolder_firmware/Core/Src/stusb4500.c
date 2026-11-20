@@ -1,49 +1,95 @@
 #include "stusb4500.h"
+#include "stusb4500_regs.h"
 #include "debug.h"
 
-USB_PD_SNK_PDO_TypeDef pdo_profile[3];
+#ifdef STUSB_DEBUG
+#include <stdio.h>
+#include <string.h>
+extern UART_HandleTypeDef huart1;
+#endif
+
 extern I2C_HandleTypeDef hi2c1;
-PDO_container_t pdos;
 
 /* Value of REG_DEVICE_ID from the last stusb_check_connection() (0 = read failed). */
 uint8_t stusb_chip_id;
 
+/* Every transfer is a handful of bytes, so the timeout only matters when the
+ * bus is stuck - keep it short enough for the polling loops below. */
+#define STUSB_I2C_TIMEOUT_MS 50u
+
+/* Window for Accept/Reject/PS_RDY after a renegotiation was started. */
+#define STUSB_CONTRACT_TIMEOUT_MS 600u
+
 static HAL_StatusTypeDef stusb_read_register(uint8_t reg, uint8_t *data, uint8_t len)
 {
-  return HAL_I2C_Mem_Read(&hi2c1, (STUSB4500_ADDR << 1), reg, I2C_MEMADD_SIZE_8BIT, data, len, 1000);
+  return HAL_I2C_Mem_Read(&hi2c1, (STUSB4500_ADDR << 1), reg, I2C_MEMADD_SIZE_8BIT, data, len, STUSB_I2C_TIMEOUT_MS);
 }
 
-static HAL_StatusTypeDef stusb_write_register(uint8_t reg, uint8_t *data, uint8_t len)
+static HAL_StatusTypeDef stusb_write_register(uint8_t reg, const uint8_t *data, uint8_t len)
 {
-  return HAL_I2C_Mem_Write(&hi2c1, (STUSB4500_ADDR << 1), reg, I2C_MEMADD_SIZE_8BIT, data, len, 1000);
+  return HAL_I2C_Mem_Write(&hi2c1, (STUSB4500_ADDR << 1), reg, I2C_MEMADD_SIZE_8BIT,
+                           (uint8_t *)(uintptr_t)data, len, STUSB_I2C_TIMEOUT_MS);
 }
 
-static HAL_StatusTypeDef read_header(PDHeader_t* header){
-	HAL_StatusTypeDef ret = HAL_ERROR;
-	uint8_t buf[2];
-	ret = stusb_read_register(REG_RX_HEADER, buf, 2);
-	header->d16 = (uint16_t)buf[0] + ((uint16_t) buf[1] << 8);
-	return ret;
+static uint32_t le32(const uint8_t *p)
+{
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-static HAL_StatusTypeDef read_pdo_objects(PDHeader_t* header){
-	HAL_StatusTypeDef ret = HAL_ERROR;
-	pdos.numPDOs = header->objects;
-	uint8_t buf[pdos.numPDOs*4];
-	ret = stusb_read_register(REG_RX_DATA_OBJS, buf, pdos.numPDOs*4);
-	uint8_t bufIdx = 0;
-	for (int obj=0; obj<header->objects; obj++) {
-		for (int i=0; i<4; i++) pdos.pdos[obj].bytes[i] = buf[bufIdx++];
-	}
-	debug_print_pdos(DEBUG_INFO, &pdos);
-	return ret;
+/* ---------------------------------------------------------------- logging --
+ * Compiled in with -DSTUSB_DEBUG=ON (tools/build.sh --debug). Release builds
+ * expand every call to nothing, so the diagnostics cost no flash there.
+ */
+#ifdef STUSB_DEBUG
+
+static void stusb_log(const char *text)
+{
+  HAL_UART_Transmit(&huart1, (uint8_t *)(uintptr_t)text, (uint16_t)strlen(text), 100);
 }
+
+static void stusb_log_reg(const char *name, uint8_t value)
+{
+  char line[32];
+
+  (void)snprintf(line, sizeof(line), "%s=%02X\n", name, (unsigned)value);
+  stusb_log(line);
+}
+
+static void stusb_log_pdo(uint8_t index, uint32_t pdo)
+{
+  char line[44];
+
+  (void)snprintf(line, sizeof(line), "  pdo%u %u.%02uV %u.%02uA type%u\n",
+                 (unsigned)index,
+                 (unsigned)(STUSB_PDO_MV(pdo) / 1000u), (unsigned)((STUSB_PDO_MV(pdo) % 1000u) / 10u),
+                 (unsigned)(STUSB_PDO_MA(pdo) / 1000u), (unsigned)((STUSB_PDO_MA(pdo) % 1000u) / 10u),
+                 (unsigned)STUSB_PDO_TYPE(pdo));
+  stusb_log(line);
+}
+
+static void stusb_log_msg(const stusb_msg_t *msg)
+{
+  char line[40];
+
+  (void)snprintf(line, sizeof(line), "msg type=%u objects=%u id=%u\n",
+                 (unsigned)msg->message_type, (unsigned)msg->object_count, (unsigned)msg->message_id);
+  stusb_log(line);
+}
+
+#else
+
+#define stusb_log(text)          ((void)0)
+#define stusb_log_reg(name, val) ((void)0)
+#define stusb_log_pdo(idx, pdo)  ((void)0)
+#define stusb_log_msg(msg)       ((void)0)
+
+#endif /* STUSB_DEBUG */
 
 HAL_StatusTypeDef stusb_check_connection(){
 	HAL_StatusTypeDef ret;
 	uint8_t chipID = 0;
 
-	ret = stusb_read_register(REG_DEVICE_ID, &chipID, 1);
+	ret = stusb_read_register(STUSB_REG_DEVICE_ID, &chipID, 1);
 	stusb_chip_id = chipID;
 
 	if (ret != HAL_OK) {
@@ -57,122 +103,300 @@ HAL_StatusTypeDef stusb_check_connection(){
 	return HAL_ERROR;
 }
 
+/* Clear the pending alerts and unmask the ones this firmware reacts to.
+ *
+ * The 12-byte burst covers ALERT_STATUS_1 (0x0B) through PRT_STATUS (0x16);
+ * those are read-to-clear, so the previous session's flags (the chip is powered
+ * from VBUS and survives an MCU reset) and a MSG_RECEIVED left over from an
+ * earlier exchange are gone. Without this the first PD message of the session
+ * can be consumed as a stale one. */
+void stusb_alerts_clear_unmask(void)
+{
+	uint8_t alerts[12];
+	uint8_t mask = (uint8_t)~STUSB_ALERT_UNMASKED;
+
+	(void)stusb_read_register(STUSB_REG_ALERT_STATUS_1, alerts, sizeof(alerts));
+	(void)stusb_write_register(STUSB_REG_ALERT_STATUS_1_MASK, &mask, 1);
+}
+
 HAL_StatusTypeDef stusb_init(){
-	HAL_StatusTypeDef ret = HAL_ERROR;
-	//clear status registers by reading
-	uint8_t dummy[10];
-	ret = stusb_read_register(REG_PORT_STATUS_0, dummy, 10);
-	uint8_t writeVal = ~VAL_PRT_STATUS_AL;
-	ret = stusb_write_register(REG_ALERT_STATUS_1_MASK, &writeVal, 1);
-	return ret;
+	stusb_alerts_clear_unmask();
+	return HAL_OK;
 }
 
-bool poll_source() {
-  HAL_StatusTypeDef halStatus = HAL_ERROR;
-  bool ret = false;
-  uint8_t alertStatus = 0;
-  halStatus = stusb_read_register(REG_ALERT_STATUS_1, &alertStatus, 1);
-  if((alertStatus & VAL_PRT_STATUS_AL) != 0){
-	  uint8_t prtStatus = 0;
-	  halStatus = stusb_read_register(REG_PRT_STATUS, &prtStatus, 1);
-	  if ((prtStatus & VAL_MSG_RECEIVED) != 0) {
-		  //HAL_Delay(1);
-		  PDHeader_t header;
-		  read_header(&header);
-		  halStatus = read_pdo_objects(&header);
-		  //objects == 0 is control message
-		  //debug_print_int_int(DEBUG_INFO,"msg,nO", header.messageType, header.objects);
-		  if (header.objects > 0 && (header.messageType == VAL_SOURCE_CAPABILITIES)) {
-			  ret = true;
-		  }else{
-			  pdos.numPDOs = 0;
-		  }
-	  }
-  }
-  return ret;
+/* Read one PD message out of the RX buffer.
+ *
+ * Order and checks follow the reference driver:
+ *   ALERT_STATUS_1 + mask -> PRT_STATUS.MSG_RECEIVED -> RX_HEADER ->
+ *   RX_BYTE_CNT (must equal objects x 4) -> RX_DATA_OBJ.
+ * The byte count check rejects a buffer that was overwritten between the
+ * header and the payload (the sink's own Request, Accept, PS_RDY...). */
+bool stusb_poll_message(stusb_msg_t *msg)
+{
+	uint8_t  alerts[2];
+	uint8_t  status;
+	uint8_t  prt = 0;
+	uint8_t  byteCount = 0;
+	uint8_t  headerBytes[2];
+	uint16_t header;
+	uint8_t  objects;
+	uint8_t  data[STUSB_RX_OBJECT_MAX * 4u];
+
+	if (msg == NULL) {
+		return false;
+	}
+
+	/* Status and mask are adjacent: one read gets both and clears the alerts. */
+	if (stusb_read_register(STUSB_REG_ALERT_STATUS_1, alerts, 2) != HAL_OK) {
+		return false;
+	}
+	status = (uint8_t)(alerts[0] & (uint8_t)~alerts[1]);
+	if ((status & STUSB_ALERT_PRT_STATUS) == 0u) {
+		return false;
+	}
+
+	if (stusb_read_register(STUSB_REG_PRT_STATUS, &prt, 1) != HAL_OK) {
+		return false;
+	}
+	if ((prt & STUSB_PRT_MSG_RECEIVED) == 0u) {
+		return false;
+	}
+
+	if (stusb_read_register(STUSB_REG_RX_HEADER, headerBytes, 2) != HAL_OK) {
+		return false;
+	}
+	header  = (uint16_t)(headerBytes[0] | ((uint16_t)headerBytes[1] << 8));
+	objects = STUSB_HDR_OBJECTS(header);
+
+	if (objects > STUSB_RX_OBJECT_MAX) {
+		return false;
+	}
+
+	if (stusb_read_register(STUSB_REG_RX_BYTE_CNT, &byteCount, 1) != HAL_OK) {
+		return false;
+	}
+	if (byteCount != (uint8_t)(objects * 4u)) {
+		stusb_log_reg("rx byte count", byteCount);
+		return false;
+	}
+
+	if (objects > 0u) {
+		if (stusb_read_register(STUSB_REG_RX_DATA_OBJ, data, (uint8_t)(objects * 4u)) != HAL_OK) {
+			return false;
+		}
+		for (uint8_t i = 0; i < objects; i++) {
+			msg->objects[i] = le32(&data[i * 4u]);
+		}
+	}
+
+	msg->message_type = STUSB_HDR_MSG_TYPE(header);
+	msg->message_id   = STUSB_HDR_MSG_ID(header);
+	msg->object_count = objects;
+	msg->is_data      = (objects > 0u);
+
+	stusb_log_msg(msg);
+	return true;
 }
 
-bool stusb_is_vbus_ready() {
-  uint8_t data = 0;
-  stusb_read_register(REG_TYPEC_MONITORING_STATUS_1, &data, 1);
-  return (data&0x08);
+/* Copy the fixed-supply PDOs of a Source_Capabilities message into `out`. */
+static uint8_t decode_source_pdos(const stusb_msg_t *msg, stusb_pdo_t *out, uint8_t max)
+{
+	uint8_t count = 0;
+
+	for (uint8_t i = 0; (i < msg->object_count) && (count < max); i++) {
+		uint32_t pdo = msg->objects[i];
+
+		/* PPS/APDO, variable and battery supplies are not used by the
+		 * station: only fixed voltages make sense for the heater. */
+		if (STUSB_PDO_TYPE(pdo) != STUSB_PDO_FIXED) {
+			continue;
+		}
+
+		out[count].mv = (i == 0u) ? 5000u : STUSB_PDO_MV(pdo);
+		out[count].ma = STUSB_PDO_MA(pdo);
+		stusb_log_pdo(count, pdo);
+		count++;
+	}
+
+	return count;
+}
+
+uint8_t stusb_read_source_pdos(stusb_pdo_t *out, uint8_t max,
+                               uint16_t per_try_ms, uint8_t attempts)
+{
+	stusb_msg_t msg;
+
+	if ((out == NULL) || (max == 0u) || (attempts == 0u)) {
+		return 0;
+	}
+
+	for (uint8_t attempt = 0; attempt < attempts; attempt++) {
+		uint32_t deadline;
+
+		/* A soft reset makes the source send its Source_Capabilities again. */
+		if (stusb_soft_reset() != HAL_OK) {
+			stusb_log("soft reset failed\n");
+			return 0;
+		}
+
+		deadline = HAL_GetTick() + per_try_ms;
+		while (HAL_GetTick() < deadline) {
+			if (!stusb_poll_message(&msg)) {
+				continue;
+			}
+			if (msg.is_data && (msg.message_type == STUSB_MSG_SOURCE_CAPABILITIES)) {
+				return decode_source_pdos(&msg, out, max);
+			}
+		}
+	}
+
+	stusb_log("no source capabilities\n");
+	return 0;
+}
+
+static HAL_StatusTypeDef stusb_write_snk_pdo(uint8_t number, uint32_t pdo)
+{
+	uint8_t raw[4];
+
+	raw[0] = (uint8_t)(pdo & 0xFFu);
+	raw[1] = (uint8_t)((pdo >> 8) & 0xFFu);
+	raw[2] = (uint8_t)((pdo >> 16) & 0xFFu);
+	raw[3] = (uint8_t)((pdo >> 24) & 0xFFu);
+
+	return stusb_write_register((uint8_t)(STUSB_REG_DPM_SNK_PDO1 + (4u * (number - 1u))), raw, 4);
+}
+
+stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
+{
+	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
+	stusb_msg_t msg;
+	uint8_t     pdo1[4];
+	uint32_t    pdo;
+	bool        accepted = false;
+	uint32_t    deadline;
+
+	/* PDO1 carries the flags every sink PDO needs (USB communication capable,
+	 * power/data roles...); only the voltage and current fields are replaced. */
+	if (stusb_read_register(STUSB_REG_DPM_SNK_PDO1, pdo1, 4) != HAL_OK) {
+		stusb_log("cannot read PDO1\n");
+		return STUSB_CONTRACT_TIMEOUT;
+	}
+	pdo = (le32(pdo1) & STUSB_PDO_TEMPLATE_MASK) | STUSB_PDO_WORD(mv, ma);
+
+	/* PDO2 first, then the count: raising the count before PDO2 is written
+	 * would let the chip negotiate the stale PDO2. */
+	if ((stusb_write_snk_pdo(2, pdo) != HAL_OK) ||
+	    (stusb_set_valid_pdo(2) != HAL_OK) ||
+	    (stusb_soft_reset() != HAL_OK)) {
+		stusb_log("request: i2c failed\n");
+		return STUSB_CONTRACT_TIMEOUT;
+	}
+
+	/* Accept, then PS_RDY once the source has moved to the new voltage. The
+	 * Source_Capabilities and other data messages in this window are consumed
+	 * and ignored. */
+	deadline = HAL_GetTick() + STUSB_CONTRACT_TIMEOUT_MS;
+	while (HAL_GetTick() < deadline) {
+		if (!stusb_poll_message(&msg) || msg.is_data) {
+			continue;
+		}
+		if (msg.message_type == STUSB_MSG_REJECT) {
+			stusb_log("contract rejected\n");
+			return STUSB_CONTRACT_REJECTED;
+		}
+		if (msg.message_type == STUSB_MSG_ACCEPT) {
+			accepted = true;
+		}
+		if (accepted && (msg.message_type == STUSB_MSG_PS_RDY)) {
+			break;
+		}
+	}
+
+	if (!accepted) {
+		stusb_log("contract timeout\n");
+		return STUSB_CONTRACT_TIMEOUT;
+	}
+
+	/* The RDO names the source PDO the link settled on: 2 means our PDO2 was
+	 * accepted, 1 means the source fell back to PDO1 (5 V). */
+	if ((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos < 2)) {
+		stusb_log("contract fell back to PDO1\n");
+		return STUSB_CONTRACT_REJECTED;
+	}
+
+	stusb_log("contract ok\n");
+	return STUSB_CONTRACT_OK;
+}
+
+void stusb_read_cable(stusb_cable_t *cable)
+{
+	uint8_t port = 0;
+	uint8_t typec = 0;
+
+	if (cable == NULL) {
+		return;
+	}
+
+	cable->attached      = false;
+	cable->cc2           = false;
+	cable->port_status   = 0;
+	cable->type_c_status = 0;
+
+	if ((stusb_read_register(STUSB_REG_PORT_STATUS, &port, 1) != HAL_OK) ||
+	    (stusb_read_register(STUSB_REG_TYPE_C_STATUS, &typec, 1) != HAL_OK)) {
+		return;
+	}
+
+	cable->port_status   = port;
+	cable->type_c_status = typec;
+	/* CC_ATTACH_STATE (bit 0) and CC_ATTACH_MODE (bits 7..5) both report the
+	 * plug; either one being set means a cable is attached. */
+	cable->attached = ((port & (STUSB_PORT_ATTACHED | STUSB_PORT_ATTACH_MODE_MASK)) != 0u);
+	cable->cc2      = ((typec & STUSB_TYPEC_REVERSE) != 0u);
+
+	stusb_log_reg("port", port);
+	stusb_log_reg("typec", typec);
 }
 
 bool stusb_is_sink_ready() {
   uint8_t data = 0;
-  stusb_read_register(REG_PE_FSM, &data, 1);
-  return (data&VAL_PE_SNK_READY);
+
+  if (stusb_read_register(STUSB_REG_PE_FSM, &data, 1) != HAL_OK) {
+	  return false;
+  }
+  stusb_log_reg("pe fsm", data);
+  /* PE_SNK_READY / PE_SNK_READY_SENDING - the contract is in place. */
+  return (data == STUSB_PE_SNK_READY) || (data == STUSB_PE_SNK_READY_SENDING);
 }
 
 bool stusb_is_sink_connected() {
   uint8_t data = 0;
-  stusb_read_register(REG_PORT_STATUS_1, &data, 1);
-  return (data&VAL_SNK_ATT);
+
+  if (stusb_read_register(STUSB_REG_PORT_STATUS, &data, 1) != HAL_OK) {
+	  return false;
+  }
+  /* Any non-zero CC_ATTACH_MODE means a plug is detected. */
+  return ((data & STUSB_PORT_ATTACH_MODE_MASK) != 0u);
 }
 
 HAL_StatusTypeDef stusb_read_rdo(STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *Nego_RDO) {
-  HAL_StatusTypeDef ret;
-  ret = stusb_read_register(REG_RDO_REG_STATUS, (uint8_t *) Nego_RDO, 4);
-  return ret;
-}
-
-HAL_StatusTypeDef stusb_update_pdo(uint8_t pdo_number, uint16_t voltage_mv, uint16_t current_ma) {
-  HAL_StatusTypeDef ret;
-  uint16_t addr;
-  uint8_t data[40];
-  uint8_t i, j = 0;
-
-  // get existing
-  addr = DPM_SNK_PDO1;
-  ret = stusb_read_register(addr, data, 12);
-  for (i = 0 ; i < 3 ; i++) { pdo_profile[i].d32 =  (uint32_t) data[j]
-                                                 + ((uint32_t) data[j+1] << 8)
-                                                 + ((uint32_t) data[j+2] << 16)
-                                                 + ((uint32_t) data[j+3] << 24);
-    j += 4;
-  }
-
-  // update
-  if ((pdo_number == 1) || (pdo_number == 2) || (pdo_number == 3)) {
-    pdo_profile[pdo_number - 1].fix.Operationnal_Current = current_ma / 10;
-    if (pdo_number == 1) {
-      //force 5V for PDO_1 to follow the USB PD spec
-      pdo_profile[pdo_number - 1].fix.Voltage = 100; // 5000/50=100
-      pdo_profile[pdo_number - 1].fix.USB_Communications_Capable = 1;
-    } else {
-      pdo_profile[pdo_number - 1].fix.Voltage = voltage_mv / 50;
-    }
-
-    addr = DPM_SNK_PDO1 + (4 * (pdo_number - 1));
-    ret = stusb_write_register(addr, (uint8_t *) &pdo_profile[pdo_number - 1].d32, 4);
-  }
-
-  return ret;
+  return stusb_read_register(STUSB_REG_RDO_REG_STATUS, (uint8_t *) Nego_RDO, 4);
 }
 
 HAL_StatusTypeDef stusb_set_valid_pdo(uint8_t valid_count) {
-  HAL_StatusTypeDef ret = HAL_ERROR;
-  if (valid_count <= 3) {
-    ret = stusb_write_register(DPM_PDO_NUMB, &valid_count, 1);
+  if (valid_count > 3) {
+    return HAL_ERROR;
   }
-  return ret;
+  return stusb_write_register(STUSB_REG_DPM_PDO_NUMB, &valid_count, 1);
 }
 
-
-
-//re-negotiate with source via soft-reset
+/* Renegotiate with the source: a soft reset makes it repeat its capabilities
+ * and lets the chip re-request the sink PDOs that are currently programmed. */
 HAL_StatusTypeDef stusb_soft_reset(){
-	uint8_t cmd[]={CMD_SOFT_RESET,0x00};
-	HAL_StatusTypeDef ret = stusb_write_register(REG_TX_HEADER_LOW, cmd, 2);
+	uint8_t cmd[]={STUSB_CMD_SOFT_RESET,0x00};
+	HAL_StatusTypeDef ret = stusb_write_register(STUSB_REG_TX_HEADER, cmd, 2);
 	if(ret != HAL_OK){ return ret; }
-	cmd[0] = CMD_SEND_COMMAND;
-	return stusb_write_register(REG_PD_COMMAND_CTRL, cmd, 1);
+	cmd[0] = STUSB_CMD_SEND;
+	return stusb_write_register(STUSB_REG_PD_COMMAND_CTRL, cmd, 1);
 }
-
-/* NOTE: the STUSB4500 does not expose the source's Source_Capabilities over
- * I2C - its PD message buffer reads back empty and a Get_Source_Cap request is
- * never answered (upstream AxxSolder hit the same wall). The available supply
- * profiles are therefore discovered by PROBING in power_source_init(). */
-
-//read USB-C connection status
 

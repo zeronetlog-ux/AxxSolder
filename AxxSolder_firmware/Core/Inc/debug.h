@@ -13,7 +13,6 @@ typedef enum{
 	DEBUG_MAX_LEVELS
 }DEBUG_VERBOSITY_t;
 
-HAL_StatusTypeDef debug_print_pdos(DEBUG_VERBOSITY_t verbosity, PDO_container_t *pdos);
 HAL_StatusTypeDef debug_print_str(DEBUG_VERBOSITY_t verbosity, char * str);
 HAL_StatusTypeDef debug_print_int(DEBUG_VERBOSITY_t verbosity, char * str, int i);
 
