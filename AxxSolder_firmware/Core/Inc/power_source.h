@@ -68,15 +68,20 @@ extern uint8_t    pd_offer_selected;
 bool power_source_apply_offer(uint8_t index);
 
 /* Boot-time power-source detection. Talks to the STUSB4500 over I2C, waits for
- * the sink to become ready, reads the source's Source_Capabilities, keeps the
- * most powerful fixed PDO (or the user's stored voltage when the source still
- * offers it), negotiates it and writes sensor_values.USB_PD_power_limit.
- * The advertised modes are left in pd_offers[]/pd_offer_count for the boot
- * banner. When the capability list cannot be read, the chip's own NVM contract
- * (5 V) is kept and pd_status becomes PD_STATUS_NO_CAPS.
+ * the sink to become ready and derives the heater power limit from the contract
+ * the controller negotiated on its own.
  *
- * Blocking, but short: ~0.3 s on a cooperative source (the list is read, not
- * probed).
+ * The source's own capability list is read - and a better contract negotiated -
+ * only when the link already runs above 5 V. At 5 V the source is a plain 5 V
+ * supply or a laptop port, and those restart when the link is touched during
+ * boot, so nothing is asked there and pd_offers[] stays empty. When the list is
+ * asked for but cannot be read, the contract the chip has is kept and pd_status
+ * becomes PD_STATUS_NO_CAPS.
+ *
+ * The modes that are on offer are left in pd_offers[]/pd_offer_count for the boot
+ * banner.
+ *
+ * Blocking, but short: ~0.5 s.
  *
  * Call once on boot, after the I2C peripheral is ready. */
 void power_source_init(void);

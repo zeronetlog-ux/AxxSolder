@@ -32,6 +32,17 @@
 #define PD_CAPS_ATTEMPTS 4u    /* soft resets before giving up                 */
 #endif
 
+/* Only renegotiate when the link already runs above this voltage.
+ *
+ * The controller negotiates a contract from its own NVM as soon as the cable is
+ * plugged in, before this code runs, so the bus voltage says what kind of source
+ * is attached: above 5 V it is a supply that speaks PD and has headroom to gain,
+ * at 5 V it is a plain 5 V source or a laptop port. Those restart when the link
+ * is touched during boot - a station on a MacBook's USB-C port bootloops, while
+ * the very same station behind a USB hub (which does no PD at all) is fine. So
+ * 5 V links are left exactly as the chip negotiated them. */
+#define PD_RENEGOTIATE_MIN_V 9.0f
+
 /* --- Public state --- */
 power_source_t power_source = POWER_DC;
 pd_status_t    pd_status    = PD_STATUS_NO_CHIP;
@@ -217,7 +228,8 @@ void power_source_init(void){
 #endif
 
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
-	bool caps_unreadable = false;
+	bool  caps_unreadable = false;
+	float boot_voltage    = 0.0f;
 
 	/* Wait for the chip to report a settled contract. Note the STUSB4500 keeps
 	 * its state across an MCU reset (it is powered from VBUS), so on a plain
@@ -225,11 +237,19 @@ void power_source_init(void){
 	(void)wait_for_sink_ready(1500);
 	HAL_Delay(100);                       /* let VBUS finish settling */
 
-	/* Read the source's own capability list. The soft reset inside needs the
-	 * settled contract above - before that the source may ignore it, which
-	 * would look like "capabilities unreadable". */
-	pd_offer_count   = discover_offers();
-	caps_unreadable  = (pd_offer_count == 0u);
+	/* Read the source's own capability list - but only when there is something to
+	 * gain and the source has already proven it speaks PD (see
+	 * PD_RENEGOTIATE_MIN_V). At 5 V nothing is asked at all. The soft reset
+	 * inside discover_offers() needs the settled contract above - before that the
+	 * source may ignore it, which would look like "capabilities unreadable". */
+	boot_voltage    = sensors_read_bus_voltage_instant();
+	debug_print_int(DEBUG_INFO,"PD boot mV", (int)(boot_voltage * 1000.0f));
+
+	pd_offer_count  = 0;
+	if(boot_voltage >= PD_RENEGOTIATE_MIN_V){
+		pd_offer_count  = discover_offers();
+		caps_unreadable = (pd_offer_count == 0u);
+	}
 
 	/* Pick the profile to run on: the user's stored preference (a voltage) when
 	 * the source still offers it, otherwise the most powerful advertised one. */
@@ -253,13 +273,19 @@ void power_source_init(void){
 		}
 		debug_print_str(DEBUG_WARNING,"Chosen profile rejected - falling back");
 	}
-	else{
+	else if(caps_unreadable){
 		debug_print_str(DEBUG_WARNING,"PD capabilities unreadable");
+	}
+	else{
+		/* 5 V link: nothing was asked, the chip's own contract stays. */
+		debug_print_str(DEBUG_INFO,"PD link left as negotiated");
 	}
 
 	/* Nothing selectable: keep the contract the chip negotiated on its own from
-	 * its NVM settings (PDO1, 5 V). Nothing is written to the DPM registers, so
-	 * VBUS never drops - only the power limit is derived from the RDO. */
+	 * its NVM settings (PDO1, 5 V on a plain supply; whatever the source and the
+	 * NVM profile agree on otherwise). Nothing is written to the DPM registers in
+	 * that case, so VBUS never drops - only the power limit is derived from the
+	 * RDO. */
 	pd_offer_selected = PD_OFFER_NONE;
 
 	if((stusb_read_rdo(&rdo) != HAL_OK) || (rdo.b.Object_Pos == 0)){
