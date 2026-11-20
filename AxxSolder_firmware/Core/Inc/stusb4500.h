@@ -106,5 +106,16 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma);
 /* Read the Type-C attach state and orientation. */
 void stusb_read_cable(stusb_cable_t *cable);
 
+/* Read the controller's own NVM settings into `out`. The chip negotiates its
+ * first contract from these settings before the MCU boots, so they explain what
+ * a source sees at plug-in. Non-destructive: the NVM is only read, and the test
+ * mode is left again afterwards.
+ *
+ * Five sectors of 8 bytes; sector 3 holds the sink PDO count and the PDO
+ * currents, sector 4 the PDO2/PDO3 voltages. */
+#define STUSB_NVM_SECTORS     5u
+#define STUSB_NVM_SECTOR_SIZE 8u
+HAL_StatusTypeDef stusb_nvm_read(uint8_t *out);
+
 #endif
 

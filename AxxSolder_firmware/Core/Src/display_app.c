@@ -12,6 +12,7 @@
 #include "gui.h"
 #include "graph.h"
 #include "moving_average.h"
+#include "stusb4500.h"    /* NVM dump screen */
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -626,6 +627,79 @@ void LCD_draw_earth_fault_popup(void) {
 /* ------------------------------------------------------------------ */
 /* USB-PD source banner (boot)                                        */
 /* ------------------------------------------------------------------ */
+
+/* ---- NVM settings dump (diagnostic build only) ----
+ *
+ * The controller negotiates its first contract from its own NVM before the MCU
+ * is up, so these bytes explain what a source sees at plug-in. Layout follows
+ * ST's NVM flasher: sector 3 holds the sink PDO count and the PDO currents,
+ * sector 4 the PDO2/PDO3 voltages. Currents are encoded as 0 = 0 A,
+ * 1..10 = code x 0.25 A + 0.25 A, 11..15 = code x 0.5 A - 2.5 A.
+ */
+static uint16_t nvm_current_ma(uint8_t code)
+{
+    if (code == 0u) {
+        return 0u;
+    }
+    if (code < 11u) {
+        return (uint16_t)((code * 250u) + 250u);
+    }
+    return (uint16_t)((code * 500u) - 2500u);
+}
+
+static void nvm_hex_line(char *out, size_t len, uint8_t tag, const uint8_t *data, uint8_t count)
+{
+    size_t pos = (size_t)snprintf(out, len, "s%u:", (unsigned)tag);
+
+    for (uint8_t i = 0; (i < count) && (pos + 4u < len); i++) {
+        pos += (size_t)snprintf(&out[pos], len - pos, " %02X", (unsigned)data[i]);
+    }
+}
+
+void LCD_show_nvm_dump(const uint8_t *nvm)
+{
+    const uint8_t *s3 = &nvm[3u * STUSB_NVM_SECTOR_SIZE];
+    const uint8_t *s4 = &nvm[4u * STUSB_NVM_SECTOR_SIZE];
+    uint16_t v2_mv = (uint16_t)(((((uint16_t)s4[1] << 8) | s4[0]) >> 6) * 50u);
+    uint16_t v3_mv = (uint16_t)(((((uint16_t)s4[3] & 0x03u) << 8) | s4[2]) * 50u);
+    uint16_t i1_ma = nvm_current_ma((uint8_t)((s3[2] & 0xF0u) >> 4));
+    uint16_t i2_ma = nvm_current_ma((uint8_t)(s3[4] & 0x0Fu));
+    uint16_t i3_ma = nvm_current_ma((uint8_t)((s3[5] & 0xF0u) >> 4));
+    uint16_t y = 56;
+    char     line[40];
+
+    UG_FillScreen(C_Background);
+    UG_FontSetTransparency(0);
+
+    LCD_PutStr(8, 8, "STUSB NVM", FONT_arial_17X18, C_Header, C_Background);
+
+    (void)snprintf(line, sizeof(line), "pdos %u", (unsigned)((s3[2] & 0x06u) >> 1));
+    LCD_PutStr(8, 34, line, FONT_arial_12X15, C_Text, C_Background);
+
+    (void)snprintf(line, sizeof(line), "1:5.00V %u.%02uA",
+                   (unsigned)(i1_ma / 1000u), (unsigned)((i1_ma % 1000u) / 10u));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+
+    y = (uint16_t)(y + 20u);
+    (void)snprintf(line, sizeof(line), "2:%u.%02uV %u.%02uA",
+                   (unsigned)(v2_mv / 1000u), (unsigned)((v2_mv % 1000u) / 10u),
+                   (unsigned)(i2_ma / 1000u), (unsigned)((i2_ma % 1000u) / 10u));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+
+    y = (uint16_t)(y + 20u);
+    (void)snprintf(line, sizeof(line), "3:%u.%02uV %u.%02uA",
+                   (unsigned)(v3_mv / 1000u), (unsigned)((v3_mv % 1000u) / 10u),
+                   (unsigned)(i3_ma / 1000u), (unsigned)((i3_ma % 1000u) / 10u));
+    LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
+
+    y = (uint16_t)(y + 22u);
+    for (uint8_t sector = 0; sector < STUSB_NVM_SECTORS; sector++) {
+        nvm_hex_line(line, sizeof(line), sector,
+                     &nvm[sector * STUSB_NVM_SECTOR_SIZE], STUSB_NVM_SECTOR_SIZE);
+        LCD_PutStr(8, y, line, FONT_arial_12X15, C_Footer, C_Background);
+        y = (uint16_t)(y + 18u);
+    }
+}
 
 /* ---- USB-PD boot banner / mode chooser ---- */
 

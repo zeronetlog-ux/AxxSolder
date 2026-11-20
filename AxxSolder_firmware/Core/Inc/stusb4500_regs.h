@@ -99,6 +99,24 @@
  * 31..30 are cleared, i.e. the result is always a fixed-supply PDO. */
 #define STUSB_PDO_TEMPLATE_MASK 0x3FF00000u
 
+/* --- NVM (the settings the chip negotiates from before the MCU is up) ---
+ * Accessed through the "FTP" test-mode registers; the sequence below follows
+ * ST's NVM flasher as wrapped by SparkFun's library. The sector layout lives in
+ * stusb4500.h (STUSB_NVM_SECTORS / STUSB_NVM_SECTOR_SIZE).
+ */
+#define STUSB_REG_RW_BUFFER          0x53u
+#define STUSB_REG_FTP_CUST_PASSWORD  0x95u
+#define STUSB_REG_FTP_CTRL_0         0x96u
+#define STUSB_REG_FTP_CTRL_1         0x97u
+
+#define STUSB_FTP_PASSWORD_VALUE     0x47u
+#define STUSB_FTP_CUST_PWR           0x80u
+#define STUSB_FTP_CUST_RST_N         0x40u
+#define STUSB_FTP_CUST_REQ           0x10u
+#define STUSB_FTP_CUST_SECT          0x07u
+#define STUSB_FTP_CUST_OPCODE        0x07u
+#define STUSB_FTP_OP_READ            0x00u
+
 /* --- RDO word (REG_RDO_REG_STATUS) --- */
 #define STUSB_RDO_MAX_CURRENT(r)  ((uint16_t)(((r) & 0x3FFu) * 10u))
 #define STUSB_RDO_OPER_CURRENT(r) ((uint16_t)((((r) >> 10) & 0x3FFu) * 10u))

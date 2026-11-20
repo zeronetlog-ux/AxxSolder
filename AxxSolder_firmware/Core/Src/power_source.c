@@ -3,6 +3,7 @@
 #include "stusb4500.h"
 #include "sensors.h"     /* sensors_get_bus_voltage */
 #include "settings.h"    /* flash_values.pd_profile */
+#include "display_app.h" /* NVM dump screen (STUSB_DEBUG builds) */
 #include "debug.h"
 #include <stdbool.h>
 #include <math.h>        /* fabsf */
@@ -183,6 +184,21 @@ void power_source_init(void){
 		debug_print_str(DEBUG_INFO,"No USB-PD sink connected");
 		return;
 	}
+
+#ifdef STUSB_DEBUG
+	/* Diagnostic build: dump the controller's own NVM settings on the screen.
+	 * It negotiates its first contract from them before the MCU is up, so they
+	 * are what a source (a laptop port, for instance) sees at plug-in. Held long
+	 * enough to photograph, which avoids needing a serial console. */
+	{
+		uint8_t nvm[STUSB_NVM_SECTORS * STUSB_NVM_SECTOR_SIZE];
+
+		if(stusb_nvm_read(nvm) == HAL_OK){
+			LCD_show_nvm_dump(nvm);
+			HAL_Delay(8000);
+		}
+	}
+#endif
 
 	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
 	bool caps_unreadable = false;

@@ -337,6 +337,82 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma)
 	return STUSB_CONTRACT_OK;
 }
 
+HAL_StatusTypeDef stusb_nvm_read(uint8_t *out)
+{
+	uint8_t value;
+	uint8_t sector;
+	uint32_t deadline;
+
+	if (out == NULL) {
+		return HAL_ERROR;
+	}
+
+	/* Unlock the NVM controller and enter read mode. */
+	value = STUSB_FTP_PASSWORD_VALUE;
+	if (stusb_write_register(STUSB_REG_FTP_CUST_PASSWORD, &value, 1) != HAL_OK) {
+		return HAL_ERROR;
+	}
+
+	value = 0x00u;                    /* NVM internal controller reset */
+	if (stusb_write_register(STUSB_REG_FTP_CTRL_0, &value, 1) != HAL_OK) {
+		return HAL_ERROR;
+	}
+
+	value = (uint8_t)(STUSB_FTP_CUST_PWR | STUSB_FTP_CUST_RST_N);
+	if (stusb_write_register(STUSB_REG_FTP_CTRL_0, &value, 1) != HAL_OK) {
+		return HAL_ERROR;
+	}
+
+	for (sector = 0; sector < STUSB_NVM_SECTORS; sector++) {
+		value = (uint8_t)(STUSB_FTP_CUST_PWR | STUSB_FTP_CUST_RST_N);
+		if (stusb_write_register(STUSB_REG_FTP_CTRL_0, &value, 1) != HAL_OK) {
+			return HAL_ERROR;
+		}
+
+		value = (uint8_t)(STUSB_FTP_OP_READ & STUSB_FTP_CUST_OPCODE);
+		if (stusb_write_register(STUSB_REG_FTP_CTRL_1, &value, 1) != HAL_OK) {
+			return HAL_ERROR;
+		}
+
+		value = (uint8_t)((sector & STUSB_FTP_CUST_SECT) |
+		                  STUSB_FTP_CUST_PWR | STUSB_FTP_CUST_RST_N | STUSB_FTP_CUST_REQ);
+		if (stusb_write_register(STUSB_REG_FTP_CTRL_0, &value, 1) != HAL_OK) {
+			return HAL_ERROR;
+		}
+
+		/* FTP_CUST_REQ is cleared by the NVM controller when the operation is
+		 * done. */
+		deadline = HAL_GetTick() + 50u;
+		do {
+			if (stusb_read_register(STUSB_REG_FTP_CTRL_0, &value, 1) != HAL_OK) {
+				return HAL_ERROR;
+			}
+			if ((value & STUSB_FTP_CUST_REQ) == 0u) {
+				break;
+			}
+		} while (HAL_GetTick() < deadline);
+
+		if ((value & STUSB_FTP_CUST_REQ) != 0u) {
+			stusb_log("nvm read timeout\n");
+			break;
+		}
+
+		if (stusb_read_register(STUSB_REG_RW_BUFFER,
+		                        &out[sector * STUSB_NVM_SECTOR_SIZE],
+		                        STUSB_NVM_SECTOR_SIZE) != HAL_OK) {
+			return HAL_ERROR;
+		}
+	}
+
+	/* Leave test mode again: release the reset and clear the password. */
+	value = STUSB_FTP_CUST_RST_N;
+	(void)stusb_write_register(STUSB_REG_FTP_CTRL_0, &value, 1);
+	value = 0x00u;
+	(void)stusb_write_register(STUSB_REG_FTP_CUST_PASSWORD, &value, 1);
+
+	return (sector == STUSB_NVM_SECTORS) ? HAL_OK : HAL_ERROR;
+}
+
 void stusb_read_cable(stusb_cable_t *cable)
 {
 	uint8_t port = 0;
