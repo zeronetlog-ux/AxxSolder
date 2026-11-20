@@ -1,6 +1,8 @@
 #ifndef POWER_SOURCE_H
 #define POWER_SOURCE_H
 
+#include <stdint.h>
+
 /* The power source currently feeding the iron.
  *
  * Set during boot by power_source_init() after the STUSB4500 chip
@@ -18,6 +20,21 @@ typedef enum {
 } power_source_t;
 
 extern power_source_t power_source;
+
+/* Why the PD detection ended where it did. Rendered next to the input voltage
+ * as a short hint ("XT", "XT?21", "PD?C25") so a missing PD contract can be
+ * diagnosed from the screen without a serial console. */
+typedef enum {
+    PD_STATUS_NO_CHIP = 0,   /* STUSB4500 not found / I2C failure      */
+    PD_STATUS_NO_SINK,       /* chip found, no cable / sink attached   */
+    PD_STATUS_NO_CONTRACT,   /* cable attached, but no PD contract     */
+    PD_STATUS_OK             /* PD contract negotiated                 */
+} pd_status_t;
+
+extern pd_status_t pd_status;
+
+/* Raw REG_DEVICE_ID value from the last detection (0 when the read failed). */
+extern uint8_t pd_chip_id;
 
 /* Boot-time power-source detection. Talks to the STUSB4500 over I2C,
  * waits for the sink to become ready, asks for the available PDOs,

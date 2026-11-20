@@ -42,10 +42,12 @@ static const pd_profile_t pd_probe_ladder[] = {
 
 /* Time to let a renegotiation settle before reading the RDO to learn whether
  * the requested PDO2 was accepted. */
-#define PD_RENEGOTIATE_SETTLE_MS 400
+#define PD_RENEGOTIATE_SETTLE_MS 300
 
 /* --- Public state --- */
 power_source_t power_source = POWER_DC;
+pd_status_t    pd_status    = PD_STATUS_NO_CHIP;
+uint8_t        pd_chip_id;
 
 /* Apply PDO1=5V/3A baseline only (valid count 1) and renegotiate. This is the
  * guaranteed-safe contract: the source can always meet 5 V, so the MCU stays
@@ -64,7 +66,7 @@ static void request_5v_baseline(void){
  * minimum for the transition to begin, then poll the instantaneous bus voltage
  * until it has held steady. */
 static void wait_for_vbus_settle(void){
-	HAL_Delay(600);                 /* let the old contract tear down & VBUS start ramping */
+	HAL_Delay(300);                 /* let the old contract tear down & VBUS start ramping */
 	float v_prev = sensors_read_bus_voltage_instant();
 	uint8_t stable_ticks = 0;
 	uint32_t settle_timeout = HAL_GetTick() + 2000;
@@ -77,31 +79,112 @@ static void wait_for_vbus_settle(void){
 	}
 }
 
+/* Wait (bounded) for the STUSB4500 to report a settled contract. */
+static bool wait_for_sink_ready(uint32_t timeout_ms){
+	uint32_t deadline = HAL_GetTick() + timeout_ms;
+
+	for(;;){
+		if(stusb_is_sink_ready()){
+			return true;
+		}
+		if(HAL_GetTick() >= deadline){
+			return false;
+		}
+		HAL_Delay(10);
+	}
+}
+
+/* Adopt the given contract: source = USB-PD, and the heater power limit becomes
+ * the measured bus voltage times the negotiated operating current. */
+static void apply_contract(const STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef *rdo){
+	power_source = POWER_USB;
+	pd_status    = PD_STATUS_OK;
+
+	/* PRIME the bus-voltage moving average so the displayed input voltage shows
+	 * the negotiated value immediately instead of ramping across the window. */
+	sensors_prime_bus_voltage();
+	sensors_get_bus_voltage();
+
+	float current_a = rdo->b.OperatingCurrent * 0.01f;   /* 10 mA units -> A */
+	sensor_values.USB_PD_power_limit =
+		sensor_values.bus_voltage * current_a * USB_PD_POWER_REDUCTION_FACTOR;
+
+	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)sensor_values.USB_PD_power_limit);
+}
+
 /* check STUSB4500 */
 void power_source_init(void){
 	if(stusb_check_connection() != HAL_OK){
 		//do error handling for STUSB
+		pd_chip_id = stusb_chip_id;
+		pd_status  = PD_STATUS_NO_CHIP;
 		debug_print_str(DEBUG_ERROR,"STUSB4500 unavailable");
 		return;
 	}
+	pd_chip_id = stusb_chip_id;
 	debug_print_str(DEBUG_INFO,"STUSB4500 found");
 
 	stusb_init();
 
-	/* 1. Is a USB-C cable actually attached? */
+	/* Is a USB-C cable actually attached? */
 	if(!stusb_is_sink_connected()){
+		pd_status = PD_STATUS_NO_SINK;
 		debug_print_str(DEBUG_INFO,"No USB-PD sink connected");
 		return;
 	}
 
-	/* 2. Start from the guaranteed-safe 5 V baseline. */
-	request_5v_baseline();
-	HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
+	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo = {0};
 
-	/* 3. Probe the ladder, highest power first; stop at the first profile the
-	 * charger accepts. PDO1 stays 5 V/3 A throughout, so a rejected probe just
-	 * falls back to 5 V (never 0 V) - no brown-out. */
-	STUSB_GEN1S_RDO_REG_STATUS_RegTypeDef rdo;
+	/* FAST PATH. The STUSB4500 negotiates its NVM-programmed PDO set by itself
+	 * as soon as the cable is attached, i.e. long before this code runs. Keep
+	 * that contract only when it is already a strong one (>= 15 V and >= 2 A,
+	 * i.e. at least 30 W): otherwise the chip's default PDO would throttle the
+	 * iron to a fraction of what the charger can deliver, and the probe ladder
+	 * below asks for something better. */
+	(void)wait_for_sink_ready(1500);
+	HAL_Delay(100);                       /* let VBUS finish settling */
+
+	if((stusb_read_rdo(&rdo) == HAL_OK) && (rdo.b.Object_Pos != 0)){
+		float v     = sensors_read_bus_voltage_instant();
+		float i     = rdo.b.OperatingCurrent * 0.01f;   /* what the chip asked for  */
+		float i_max = rdo.b.MaxCurrent * 0.01f;         /* what the source offers   */
+
+		debug_print_int(DEBUG_INFO,"Auto contract mV", (int)(v * 1000.0f));
+		debug_print_int(DEBUG_INFO,"Auto contract mA", (int)(i * 1000.0f));
+		debug_print_int(DEBUG_INFO,"Source PDO max mA", (int)(i_max * 1000.0f));
+
+		if((v >= 15.0f) && (i >= 2.0f)){
+			apply_contract(&rdo);
+			return;
+		}
+
+		/* The chip's NVM PDO may ask for far less current than the source
+		 * offers (e.g. 20 V/1 A while the charger can do 20 V/3 A). The RDO
+		 * carries the source's own figure in MaxCurrent, so request the same
+		 * voltage at that current - one renegotiation instead of the ladder. */
+		if((v >= 15.0f) && (i_max > (i + 0.1f))){
+			uint16_t mv = (uint16_t)(((uint16_t)(v * 1000.0f) / 50u) * 50u);   /* 50 mV steps */
+
+			stusb_update_pdo(2, mv, (uint16_t)(i_max * 1000.0f));
+			stusb_set_valid_pdo(2);
+			stusb_soft_reset();
+			HAL_Delay(PD_RENEGOTIATE_SETTLE_MS);
+
+			if((stusb_read_rdo(&rdo) == HAL_OK) && (rdo.b.Object_Pos != 0) &&
+			   ((rdo.b.OperatingCurrent * 0.01f) >= 2.0f)){
+				debug_print_str(DEBUG_INFO,"Source PDO accepted at its max current");
+				wait_for_vbus_settle();
+				apply_contract(&rdo);
+				return;
+			}
+		}
+	}
+
+	/* SLOW PATH. The automatic contract is weak (or unknown), so ask for more.
+	 * PDO1 (5 V) is left untouched, so every rejected request falls back to a
+	 * safe 5 V contract - no brown-out - which also makes the explicit 5 V
+	 * baseline unnecessary here. Probe the ladder, highest power first, and stop
+	 * at the first profile the charger accepts. */
 	bool accepted = false;
 	for(uint8_t i = 0; i < PD_PROBE_COUNT; i++){
 		stusb_update_pdo(2, pd_probe_ladder[i].mv, pd_probe_ladder[i].ma);
@@ -123,7 +206,7 @@ void power_source_init(void){
 		}
 	}
 
-	/* 4. If nothing was accepted, return to a clean 5 V baseline contract. */
+	/* If nothing was accepted, return to a clean 5 V baseline contract. */
 	if(!accepted){
 		debug_print_str(DEBUG_WARNING,"No high-power PDO accepted - holding 5V");
 		request_5v_baseline();
@@ -131,24 +214,14 @@ void power_source_init(void){
 		stusb_read_rdo(&rdo);
 	}
 
-	/* 5. Confirm an explicit PD contract exists. */
+	/* Confirm an explicit PD contract exists. */
 	if(rdo.b.Object_Pos == 0){
+		pd_status = PD_STATUS_NO_CONTRACT;
 		debug_print_str(DEBUG_INFO,"No USB-PD contract");
 		return;   /* leave power_source = POWER_DC */
 	}
-	power_source = POWER_USB;
 
-	/* 6. Let VBUS settle at the negotiated voltage, then PRIME the bus-voltage
-	 * moving-average filter so the displayed input voltage shows the negotiated
-	 * value immediately instead of ramping across the filter window. */
+	/* Let VBUS settle at the negotiated voltage before measuring it. */
 	wait_for_vbus_settle();
-	sensors_prime_bus_voltage();    /* fill the MA window with the settled reading */
-	sensors_get_bus_voltage();      /* refresh sensor_values.bus_voltage from the primed filter */
-
-	/* Derive the heater power limit from the ACTUAL contract: measured bus
-	 * voltage (PA2) times the negotiated operating current (RDO, 10 mA units). */
-	float negotiated_current_a = rdo.b.OperatingCurrent * 0.01f;   /* 10 mA units -> A */
-	float watts = sensor_values.bus_voltage * negotiated_current_a * USB_PD_POWER_REDUCTION_FACTOR;
-	sensor_values.USB_PD_power_limit = watts;
-	debug_print_int(DEBUG_INFO,"USB-PD power limit (W)", (int)watts);
+	apply_contract(&rdo);
 }

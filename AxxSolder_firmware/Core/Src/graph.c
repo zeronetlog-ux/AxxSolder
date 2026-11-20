@@ -155,8 +155,6 @@ void draw_graph_init(void) {
 			LCD_PutStr(180, 70, "°F", FONT_arial_20X23, C_Text, C_Background);
 		}
 
-		LCD_PutStr(10, 95, "Handle:", FONT_arial_17X18, C_Text, C_Background);
-		LCD_PutStr(127, 95, "Vin:", FONT_arial_17X18, C_Text, C_Background);
 
 		UG_DrawLine(0, 296, 240, 296, C_Footer);
 		UG_DrawLine(0, 297, 240, 297, C_Footer);
@@ -221,8 +219,6 @@ void draw_graph_init(void) {
 			LCD_PutStr(180, 70, "°F", FONT_arial_20X23, C_Text, C_Background);
 		}
 
-		LCD_PutStr(10, 95, "Handle:", FONT_arial_17X18, C_Text, C_Background);
-		LCD_PutStr(126, 95, "Vin:", FONT_arial_17X18, C_Text, C_Background);
 
 		//LCD_PutStr(205, 95, "AxxSolder", FONT_arial_17X18, C_Header, C_Background);
 

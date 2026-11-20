@@ -42,6 +42,88 @@ float convert_temperature(float temperature){
 	}
 }
 
+/* Handle name for the info line ("---" when no known handle is detected). */
+static const char *handle_name_str(void)
+{
+    switch (attached_handle) {
+    case T210:  return "T210";
+    case T245:  return "T245";
+    case NT115: return "NT115";
+    default:    return "---";
+    }
+}
+
+/* Power-source label for the info line. For USB-PD the negotiated contract
+ * power (sensor_values.USB_PD_power_limit, watts) is appended. */
+static void format_power_source(char *buf, size_t len)
+{
+    switch (power_source) {
+    case POWER_USB:
+        if ((sensor_values.USB_PD_power_limit > 0.0f) &&
+            (sensor_values.USB_PD_power_limit < 1000.0f)) {
+            (void)snprintf(buf, len, "PD %dW", (int)(sensor_values.USB_PD_power_limit + 0.5f));
+        } else {
+            (void)snprintf(buf, len, "PD");
+        }
+        break;
+
+    case POWER_DC:
+        /* A PD cable that delivered power but whose contract we could not
+         * detect is the interesting case here, so the reason is shown:
+         *   XT        - no PD cable attached (plain barrel-jack supply)
+         *   XT?id     - STUSB4500 not found / I2C failure (id = 0 on failure)
+         *   PD?Cid    - cable attached, but no PD contract was negotiated     */
+        if (pd_status == PD_STATUS_NO_CONTRACT) {
+            (void)snprintf(buf, len, "PD?C%02X", (unsigned)pd_chip_id);
+        } else if (pd_status == PD_STATUS_NO_CHIP) {
+            (void)snprintf(buf, len, "XT?%02X", (unsigned)pd_chip_id);
+        } else {
+            (void)snprintf(buf, len, "XT");
+        }
+        break;
+
+    case POWER_BAT:
+        (void)snprintf(buf, len, "BAT");
+        break;
+
+    default:
+        (void)snprintf(buf, len, "---");
+        break;
+    }
+}
+
+/* One-line variant for the graph view (space is tight above the plot):
+ * "Handle:T245 Vin:19.8 PD 60W" in the small font. */
+static void draw_graph_info_line(uint16_t x, uint16_t y)
+{
+    char src[12];
+
+    format_power_source(src, sizeof(src));
+    (void)snprintf(DISPLAY_buffer, sizeof(DISPLAY_buffer), "Handle:%-4s Vin:%d.%d %s",
+                   handle_name_str(),
+                   (int)sensor_values.bus_voltage,
+                   (int)(sensor_values.bus_voltage * 10) % 10,
+                   src);
+    LCD_PutStr(x, y, DISPLAY_buffer, FONT_arial_12X15, C_Text, C_Background);
+}
+
+/* Draw "Handle:<name>" and "Vin:<volts> <source>" (source after the voltage,
+ * with the negotiated power for USB-PD). Used by both screen orientations. */
+static void draw_info_lines(uint16_t x, uint16_t y_handle, uint16_t y_vin)
+{
+    char src[12];
+
+    (void)snprintf(DISPLAY_buffer, sizeof(DISPLAY_buffer), "Handle:%-5s", handle_name_str());
+    LCD_PutStr(x, y_handle, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
+
+    format_power_source(src, sizeof(src));
+    (void)snprintf(DISPLAY_buffer, sizeof(DISPLAY_buffer), "Vin:%d.%d %-7s",
+                   (int)sensor_values.bus_voltage,
+                   (int)(sensor_values.bus_voltage * 10) % 10,
+                   src);
+    LCD_PutStr(x, y_vin, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
+}
+
 /* Formatting float into a string as right-aligned, by adding spaces on the left */
 static void format_number_right(float input, char* buffer) {
     int rounded = (int)clamp(roundf(input), 0, 999);
@@ -139,13 +221,8 @@ static void update_graph_display(void) {
             LCD_PutStr(140, 70, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
         }
 
-        memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-        sprintf(DISPLAY_buffer, "%d.%d", (int)sensor_values.bus_voltage, (int)(sensor_values.bus_voltage * 10) % 10);
-        LCD_PutStr(162, 95, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
-
-        if      (attached_handle == T210)  LCD_PutStr(75, 95, "T210  ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == T245)  LCD_PutStr(75, 95, "T245  ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == NT115) LCD_PutStr(75, 95, "NT115", FONT_arial_17X18, C_Text, C_Background);
+        /* Handle + input voltage + power source (PD shows negotiated power). */
+        draw_graph_info_line(10, 95);
 
         UG_DrawFrame(208, 44, 229, 109, C_Text);
 
@@ -184,13 +261,8 @@ static void update_graph_display(void) {
             LCD_PutStr(140, 70, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
         }
 
-        memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-        sprintf(DISPLAY_buffer, "%d.%d", (int)sensor_values.bus_voltage, (int)(sensor_values.bus_voltage * 10) % 10);
-        LCD_PutStr(162, 95, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
-
-        if      (attached_handle == T210)  LCD_PutStr(75, 95, "T210  ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == T245)  LCD_PutStr(75, 95, "T245  ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == NT115) LCD_PutStr(75, 95, "NT115", FONT_arial_17X18, C_Text, C_Background);
+        /* Handle + input voltage + power source (PD shows negotiated power). */
+        draw_graph_info_line(10, 95);
 
         UG_DrawFrame(288, 44, 310, 109, C_Text);
 
@@ -243,9 +315,8 @@ static void update_display(void) {
             LCD_PutStr(19, 160, DISPLAY_buffer, FONT_arial_36X44_NUMBERS, C_Text, C_Background);
         }
 
-        memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-        sprintf(DISPLAY_buffer, "%d.%d", (int)sensor_values.bus_voltage, (int)(sensor_values.bus_voltage * 10) % 10);
-        LCD_PutStr(125, 255, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
+        /* Handle + input voltage + power source (PD shows negotiated power). */
+        draw_info_lines(11, 235, 255);
 
         memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
         if (convert_temperature(sensor_values.mcu_temperature) < 99.5f) {
@@ -254,10 +325,6 @@ static void update_display(void) {
             sprintf(DISPLAY_buffer, "%d", (int)convert_temperature(sensor_values.mcu_temperature));
         }
         LCD_PutStr(59, 275, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
-
-        if      (attached_handle == T210)  LCD_PutStr(125, 235, "T210   ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == T245)  LCD_PutStr(125, 235, "T245   ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == NT115) LCD_PutStr(125, 235, "NT115", FONT_arial_17X18, C_Text, C_Background);
 
         if (sensor_values.max_power_watt < 100) {
             sprintf(DISPLAY_buffer, "  %d W", (int)sensor_values.max_power_watt);
@@ -319,9 +386,8 @@ static void update_display(void) {
             LCD_PutStr(64, 115, DISPLAY_buffer, FONT_arial_36X44_NUMBERS, C_Text, C_Background);
         }
 
-        memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-        sprintf(DISPLAY_buffer, "%d.%d", (int)sensor_values.bus_voltage, (int)(sensor_values.bus_voltage * 10) % 10);
-        LCD_PutStr(170, 195, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
+        /* Handle + input voltage + power source (PD shows negotiated power). */
+        draw_info_lines(56, 175, 195);
 
         memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
         if (convert_temperature(sensor_values.mcu_temperature) < 99.5f) {
@@ -330,10 +396,6 @@ static void update_display(void) {
             sprintf(DISPLAY_buffer, "%d", (int)convert_temperature(sensor_values.mcu_temperature));
         }
         LCD_PutStr(102, 215, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
-
-        if      (attached_handle == T210)  LCD_PutStr(170, 175, "T210   ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == T245)  LCD_PutStr(170, 175, "T245   ", FONT_arial_17X18, C_Text, C_Background);
-        else if (attached_handle == NT115) LCD_PutStr(170, 175, "NT115", FONT_arial_17X18, C_Text, C_Background);
 
         if (sensor_values.max_power_watt < 100) {
             sprintf(DISPLAY_buffer, "%d W  ", (int)sensor_values.max_power_watt);
@@ -417,18 +479,12 @@ void LCD_draw_main_screen(void) {
         UG_DrawFrame(11, 129, 187, 211, C_Text);
         UG_DrawFrame(10, 128, 188, 212, C_Text);
 
-        LCD_PutStr(11, 235, "Handle type:", FONT_arial_17X18, C_Text, C_Background);
-        LCD_PutStr(11, 255, "Input voltage:         V", FONT_arial_17X18, C_Text, C_Background);
+        /* Handle / input voltage / power source are drawn by
+         * display_app_tick(); only the static MCU label lives here. */
         if (flash_values.deg_celsius == 1) {
             LCD_PutStr(11, 275, "MCU:     °C", FONT_arial_17X18, C_Text, C_Background);
         } else {
             LCD_PutStr(11, 275, "MCU:      °F", FONT_arial_17X18, C_Text, C_Background);
-        }
-        LCD_PutStr(105, 275, "SRC:", FONT_arial_17X18, C_Text, C_Background);
-        switch (power_source) {
-            case POWER_DC:  LCD_PutStr(150, 275, "DC",  FONT_arial_17X18, C_Text, C_Background); break;
-            case POWER_USB: LCD_PutStr(150, 275, "USB", FONT_arial_17X18, C_Text, C_Background); break;
-            case POWER_BAT: LCD_PutStr(150, 275, "BAT", FONT_arial_17X18, C_Text, C_Background); break;
         }
 
         if (flash_values.power_unit == 0) { // power unit is set to W
@@ -481,18 +537,12 @@ void LCD_draw_main_screen(void) {
         UG_DrawFrame(56, 84, 232, 170, C_Text);
         UG_DrawFrame(56, 83, 233, 171, C_Text);
 
-        LCD_PutStr(56, 175, "Handle type:", FONT_arial_17X18, C_Text, C_Background);
-        LCD_PutStr(56, 195, "Input voltage:          V", FONT_arial_17X18, C_Text, C_Background);
+        /* Handle / input voltage / power source are drawn by
+         * display_app_tick(); only the static MCU label lives here. */
         if (flash_values.deg_celsius == 1) {
             LCD_PutStr(56, 215, "MCU:      °C", FONT_arial_17X18, C_Text, C_Background);
         } else {
             LCD_PutStr(56, 215, "MCU:       °F", FONT_arial_17X18, C_Text, C_Background);
-        }
-        LCD_PutStr(160, 215, "SRC:", FONT_arial_17X18, C_Text, C_Background);
-        switch (power_source) {
-            case POWER_DC:  LCD_PutStr(210, 215, "DC",  FONT_arial_17X18, C_Text, C_Background); break;
-            case POWER_USB: LCD_PutStr(210, 215, "USB", FONT_arial_17X18, C_Text, C_Background); break;
-            case POWER_BAT: LCD_PutStr(210, 215, "BAT", FONT_arial_17X18, C_Text, C_Background); break;
         }
 
         UG_DrawLine(265, 0, 265, 240, C_Footer);

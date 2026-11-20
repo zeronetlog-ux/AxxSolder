@@ -26,6 +26,10 @@
 
 #define VAL_STUSB4500_ID 0x25
 #define VAL_STUSB4500_ID_B 0x21
+
+/* Raw value of REG_DEVICE_ID read by stusb_check_connection(); 0 = read failed.
+ * Used by the UI to explain why PD was not detected. */
+extern uint8_t stusb_chip_id;
 #define VAL_PRT_STATUS_AL          0x02
 #define VAL_MSG_RECEIVED           0x04
 #define VAL_SOURCE_CAPABILITIES    0x01

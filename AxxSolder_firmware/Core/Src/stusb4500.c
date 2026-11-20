@@ -5,6 +5,9 @@ USB_PD_SNK_PDO_TypeDef pdo_profile[3];
 extern I2C_HandleTypeDef hi2c1;
 PDO_container_t pdos;
 
+/* Value of REG_DEVICE_ID from the last stusb_check_connection() (0 = read failed). */
+uint8_t stusb_chip_id;
+
 static HAL_StatusTypeDef stusb_read_register(uint8_t reg, uint8_t *data, uint8_t len)
 {
   return HAL_I2C_Mem_Read(&hi2c1, (STUSB4500_ADDR << 1), reg, I2C_MEMADD_SIZE_8BIT, data, len, 1000);
@@ -37,11 +40,21 @@ static HAL_StatusTypeDef read_pdo_objects(PDHeader_t* header){
 }
 
 HAL_StatusTypeDef stusb_check_connection(){
-	HAL_StatusTypeDef ret = HAL_ERROR;
-	uint8_t chipID;
+	HAL_StatusTypeDef ret;
+	uint8_t chipID = 0;
+
 	ret = stusb_read_register(REG_DEVICE_ID, &chipID, 1);
-	ret = (chipID == VAL_STUSB4500_ID) ? ret : HAL_ERROR;
-	return ret;
+	stusb_chip_id = chipID;
+
+	if (ret != HAL_OK) {
+		return HAL_ERROR;
+	}
+	/* 0x25 = STUSB4500, 0x21 = STUSB4500B: both are valid parts, the B
+	 * revision would otherwise be treated as "no PD controller at all". */
+	if ((chipID == VAL_STUSB4500_ID) || (chipID == VAL_STUSB4500_ID_B)) {
+		return HAL_OK;
+	}
+	return HAL_ERROR;
 }
 
 HAL_StatusTypeDef stusb_init(){
