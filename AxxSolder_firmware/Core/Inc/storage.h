@@ -21,6 +21,11 @@ typedef struct {
 /* Flash backend */
 extern const StorageDriver storage_flash;
 
+/* Raw page write used by the FAT volume of the USB-storage mode
+ * (fs_disk.c): erases the whole 2 KB page and programs it with `page`.
+ * `page_addr` must be page aligned. */
+bool storage_flash_write_page(uintptr_t page_addr, const uint8_t *page);
+
 /* ---- Linker symbols for flash sections ---- */
 extern uint32_t _sprofiles;
 extern uint32_t _eprofiles;

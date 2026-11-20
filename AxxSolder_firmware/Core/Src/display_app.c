@@ -391,7 +391,7 @@ void LCD_draw_main_screen(void) {
     if ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) {
         UG_FillScreen(C_Background);
 
-        LCD_PutStr(53, 8, "AxxSolder", FONT_arial_19X22, C_Header, C_Background);
+        LCD_PutStr(50, 8, "NONAME", FONT_arial_19X22, C_Header, C_Background);
         LCD_DrawLine(0, 36, 240, 36, C_Header);
         LCD_DrawLine(0, 37, 240, 37, C_Header);
         LCD_DrawLine(0, 38, 240, 38, C_Header);
@@ -457,7 +457,7 @@ void LCD_draw_main_screen(void) {
     }
     else {
         UG_FillScreen(C_Background);
-        LCD_PutStr(165, 10, "AxxSolder", FONT_arial_20X23, C_Header, C_Background);
+        LCD_PutStr(165, 10, "NONAME", FONT_arial_20X23, C_Header, C_Background);
 
         LCD_PutStr(64, 10, "Set temp", FONT_arial_20X23, C_Text, C_Background);
         UG_DrawCircle(173, 41, 5, C_Text);

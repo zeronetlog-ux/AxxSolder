@@ -17,6 +17,9 @@ file(GLOB source_list
     ${CMAKE_SOURCE_DIR}/Drivers/LCD/*.c
     ${CMAKE_SOURCE_DIR}/Drivers/UGUI/*.c
     ${CMAKE_SOURCE_DIR}/Drivers/UGUI/Fonts/*.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_USB_Device_Library/Core/Src/*.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_USB_Device_Library/Class/MSC/Src/*.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FatFS/src/*.c
 )
 
 set(include_list ${include_list}
@@ -27,6 +30,9 @@ set(include_list ${include_list}
     ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/Include
     ${CMAKE_SOURCE_DIR}/Drivers/STM32G4xx_HAL_Driver/Inc
     ${CMAKE_SOURCE_DIR}/Drivers/STM32G4xx_HAL_Driver/Inc/Legacy
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_USB_Device_Library/Core/Inc
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_USB_Device_Library/Class/MSC/Inc
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FatFS/src
 )
 
 add_executable(${EXECUTABLE} ${source_list} ${CMAKE_SOURCE_DIR}/Core/Startup/startup_stm32g431cbtx.s)
@@ -50,6 +56,8 @@ target_compile_definitions(${EXECUTABLE} PRIVATE
     "LCD_ROTATION=${LCD_ROTATION}"
     "STORAGE_PROFILES_${STORAGE_PROFILES}"
     "STORAGE_SETTINGS_${STORAGE_SETTINGS}"
+    "USE_USB_FS"
+    "USE_USB_DOUBLE_BUFFER=0"
 )
 
 set(CPU_PARAMETERS ${CPU_PARAMETERS}

@@ -50,6 +50,8 @@
 #include <stdio.h>
 #include <float.h>
 #include "graph.h"
+#include "boot_mode.h"
+#include "usb_mode.h"
 //#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
@@ -263,6 +265,13 @@ int main(void)
   MX_TIM16_Init();
   MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
+
+	/* SW_2 (preset 1) held while powering up selects USB-storage mode: the
+	 * station shows a notice and publishes AXX.CFG as a removable disk. No
+	 * heating, no PID - only removed together with the power. */
+	if (boot_request_usb_storage()) {
+		usb_storage_mode_run();
+	}
 
 	heater_set_duty(0);		//Set heater duty to zero to ensure zero startup current
 	HAL_TIMEx_PWMN_Start_IT(&htim1, TIM_CHANNEL_3);
@@ -1296,6 +1305,15 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/* Used by the USB-storage mode (usb_mode.c). TIM1 has already been initialised
+ * by MX_TIM1_Init() at that point; driving both outputs with zero duty puts the
+ * power stage into the same "off" state as a normal boot does. */
+void app_heater_hardware_off(void)
+{
+	heater_set_duty(0);
+	HAL_TIMEx_PWMN_Start_IT(&htim1, TIM_CHANNEL_3);
+}
 
 /* USER CODE END 4 */
 

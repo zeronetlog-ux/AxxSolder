@@ -35,6 +35,7 @@ Please use [Discord](https://discord.gg/AwpHEmsyKj) for build related and genera
 - [First start up after build](#first-start-up-after-build)
 - [Settings](#settings)
 - [Profiles](#profiles)
+- [USB storage mode](#usb-storage-mode)
 - [PID control](#pid-control)
 - [Cartridge differences](#cartridge-differences)
 - [Temperature calibration](#temperature-calibration)
@@ -49,7 +50,7 @@ Please use [Discord](https://discord.gg/AwpHEmsyKj) for build related and genera
 - If AxxSolder is left in normal running mode for longer than 30 min, the station automatically goes into sleep mode after 30 min as a safety feature.  
 - Should the temperature ever go higher than 490 °C overheating is detected and the station goes into sleep mode in order to protect the tip.
 - At start-up any USB-PD source is detected and the highest possible power is negotiated. AxxSolder limits the soldering iron output power to the max output power of the USB-PD source automatically. The maximum power output is displayed at the top of the power bar graph on the display.
-- User settings are stored in non-volatile flash and can be configured via a settings menu described in [SETTINGS](#settings).
+- User settings are stored in non-volatile flash and can be configured via a settings menu described in [SETTINGS](#settings). They can also be edited as a text file over USB, see [USB storage mode](#usb-storage-mode).
 - The two buttons are used to store temperature presets, e.g. 330 °C and 430 °C. Both preset temperatures are configurable in the settings menu. The stored preset temperature can be updated to the current set temperature by long-pressing the preset button.
 - There is a 3.3 V logic level output (GPIO4) that can be configured to go high when the iron is in Run mode, controlling e.g. fume extractor via a MosFET or relay.
 - The TFT display used in this project is a 2 inch 320x240 Color TFT display [2.0" 320x240 Color IPS TFT Display](https://www.adafruit.com/product/4311) and shows information about:
@@ -177,6 +178,32 @@ These come in a variety of models and are available from several different place
 8. If you get the message *File download complete* everything succeeded and the USB cable can be disconnected.
 9. Power cycle once and AxxSolder should boot.
 
+### Command line alternative
+
+The same update can be done from a terminal without STM32CubeProgrammer.
+With [dfu-util](https://dfu-util.sourceforge.net) (`brew install dfu-util`,
+`apt install dfu-util`, ...):
+
+```sh
+dfu-util -l                                    # device must show up as 0483:df11
+dfu-util -a 0 -s 0x08000000:leave -D AxxSolder.bin
+```
+
+or with the STM32CubeProgrammer CLI:
+
+```sh
+STM32_Programmer_CLI -c port=USB1 -w AxxSolder.bin 0x08000000 -v -rst
+```
+
+In this repository `AxxSolder_firmware/tools/flash_dfu.sh` wraps both tools:
+it picks the STM32 out of the connected DFU devices by its serial number and
+flashes `build/AxxSolder.bin`. Add `--erase-all` for a full chip erase (this
+also clears the stored settings, the tip profiles and the USB-storage FAT
+volume - all of them are re-created with defaults on the next boot).
+
+Note that only the application region is written by a normal update, so the
+settings/profile pages and the FAT volume keep their content.
+
 # First start up after build
 The first start up after you have built your AxxSolder can be intense. Double check all solder connections under a loupe/microscope before applying power. Especially the OPA2387, LTC4440 and the STM32G431 are all small packages with tight pad spacing and can have solder bridges. Do also double check the connections to the soldering iron/stand which are shown in this document under [AxxSolder Station](#axxsolder-station) and [AxxSolder Portable](#axxsolder-portable).  
 The first thing to do after you have double-checked everything is to follow the steps under [Firmware update](#firmware-update). It is wise to do the first programming of AxxSolder without any handle piece and with only 3.3 V, not VDD. After the programming is done you can now power up AxxSolder again via 3.3 V, this time you can also attach your handle. This allows you to test that your handle type is detected correctly (the detected handle type NT115/T210/T245 is shown in the display). The Standby feature can also be tested by touching the stand (STAND Input).  
@@ -223,6 +250,11 @@ To access the user settings the user holds down the encoder button at start-up o
 |SYSTEM|-Load Default-|Load default parameters|N/A|N/A|
 |SYSTEM|-Save and Reboot-|Exit and Save|N/A|N/A|
 |SYSTEM|-Exit no Save-|Exit without Save|N/A|N/A|
+
+# USB storage mode
+Holding the `preset 1` button (`SW_2`) while powering the station up starts a special mode instead of the normal firmware: the display shows `USB STORAGE MODE`, heating stays off for the whole session and the station appears on the host as a small removable drive containing a single text file, `AXX.CFG`, with all user settings as `key=value` lines. Edit the file, save it and eject the drive - the values are written to flash and the station reboots into the normal firmware. Unplugging the power also leaves the mode.
+
+See [docs/USB_STORAGE.md](docs/USB_STORAGE.md) for the file format, the flash layout, the flash-wear considerations and how the FatFS/MSC stack is wired up.
 
 # Profiles
 Under the setting menu Profiles the user can select, adjust and create new profiles for the supported cartridge types. name, PID parameters, calibration data and power limits can be set individually for each profile and are saved to flash. A more detailed instruction can be found under [PROFILES.md](./docs/PROFILES.md)

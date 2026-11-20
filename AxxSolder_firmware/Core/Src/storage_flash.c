@@ -127,3 +127,10 @@ const StorageDriver storage_flash = {
 	.write  = flash_write,
 	.verify = flash_verify,
 };
+
+/* ---- Raw page access (FAT volume in the FS region) ---- */
+
+bool storage_flash_write_page(uintptr_t page_addr, const uint8_t *page)
+{
+	return flash_write_dwords((uint32_t)page_addr, (const uint32_t *)page, FLASH_PAGE_SIZE / 8) == 0;
+}

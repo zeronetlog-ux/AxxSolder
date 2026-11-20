@@ -45,10 +45,20 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 MEMORY
 {
   RAM      (xrw)    : ORIGIN = 0x20000000,   LENGTH = 32K
-  FLASH    (rx)     : ORIGIN = 0x8000000,    LENGTH = 124K
+  FLASH    (rx)     : ORIGIN = 0x8000000,    LENGTH = 104K
+  FS       (rw)     : ORIGIN = 0x0801A000,   LENGTH = 20K
   PROFILES (rw)     : ORIGIN = 0x0801F000,   LENGTH = 2K
   SETTINGS (rw)     : ORIGIN = 0x0801F800,   LENGTH = 2K
 }
+
+/* FAT volume used by the USB-storage (USB MSC) mode.
+ * 20 KB = 40 sectors x 512 B; with 512-byte clusters, 1 FAT and a 16-entry
+ * root directory that leaves 37 clusters - FatFS refuses FAT12 volumes with
+ * fewer than 33 clusters (MIN_FAT12), so this is the smallest legal size.
+ * The size is a multiple of the 2 KB flash page, so page rewrites stay inside
+ * the region. Not a C section: only the address is exposed to fs_disk.c. */
+_sfs = ORIGIN(FS);
+_efs = ORIGIN(FS) + LENGTH(FS);
 
 /* Sections */
 SECTIONS
