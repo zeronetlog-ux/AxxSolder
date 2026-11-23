@@ -178,7 +178,7 @@ static void update_standby_sleep_display(void) {
     char display_buffer[40]  = {0};
     // clean field
     if(sensor_values.current_state == SLEEP || sensor_values.current_state == RUN || sensor_values.current_state == HALTED || sensor_values.current_state == EMERGENCY_SLEEP){
-    	LCD_PutStr(11, 215, "                            ", FONT_arial_17X18, C_Header, C_Background);
+    	LCD_PutStr(11, 235, "                            ", FONT_arial_17X18, C_Header, C_Background);
     }
 
     switch(sensor_values.current_state) {
@@ -209,7 +209,7 @@ static void update_standby_sleep_display(void) {
     } else {
         strcpy(display_buffer, "                    "); // clear display or show nothing
     }
-	LCD_PutStr(11, 215, display_buffer, FONT_arial_17X18, C_Header, C_Background);
+	LCD_PutStr(11, 235, display_buffer, FONT_arial_17X18, C_Header, C_Background);
 }
 
 /* ------------------------------------------------------------------ */
@@ -220,39 +220,39 @@ static void update_graph_display(void) {
     if ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) {
         memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
         format_number_left(convert_temperature(sensor_values.set_temperature), DISPLAY_buffer);
-        LCD_PutStr(140, 45, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
+        LCD_PutStr(140, 8, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
 
         if (cartridge_state == DETACHED) {
-            LCD_PutStr(140, 70, " ---  ", FONT_arial_20X23, C_Text, C_Background);
+            LCD_PutStr(140, 33, " ---  ", FONT_arial_20X23, C_Text, C_Background);
         } else {
             memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
             format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), DISPLAY_buffer);
-            LCD_PutStr(140, 70, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
+            LCD_PutStr(140, 33, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
         }
 
         /* Handle + input voltage + power source (PD shows negotiated power). */
-        draw_graph_info_line(10, 95);
+        draw_graph_info_line(10, 58);
 
-        UG_DrawFrame(208, 44, 229, 109, C_Text);
+        UG_DrawFrame(208, 7, 229, 72, C_Text);
 
         if ((sensor_values.current_state == SLEEP || sensor_values.current_state == EMERGENCY_SLEEP || sensor_values.current_state == HALTED) && !sleep_state_written_to_LCD) {
-            UG_FillFrame(209, 45, 228, 108, C_Highlight);
-            LCD_PutStr(214, 50, "Z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(215, 69, "z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(214, 90, "Z", FONT_arial_17X18, C_Background, C_Highlight);
+            UG_FillFrame(209, 8, 228, 71, C_Highlight);
+            LCD_PutStr(214, 13, "Z", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(215, 32, "z", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(214, 53, "Z", FONT_arial_17X18, C_Background, C_Highlight);
             sleep_state_written_to_LCD = 1;
             standby_state_written_to_LCD = 0;
         }
         else if ((sensor_values.current_state == STANDBY) && !standby_state_written_to_LCD) {
-            UG_FillFrame(209, 45, 228, 108, C_Highlight);
-            LCD_PutStr(213, 50, "S", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(213, 70, "T", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(213, 90, "B", FONT_arial_17X18, C_Background, C_Highlight);
+            UG_FillFrame(209, 8, 228, 71, C_Highlight);
+            LCD_PutStr(213, 13, "S", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(213, 33, "T", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(213, 53, "B", FONT_arial_17X18, C_Background, C_Highlight);
             standby_state_written_to_LCD = 1;
             sleep_state_written_to_LCD = 0;
         }
         else if (sensor_values.current_state == RUN) {
-            UG_FillFrame(209, 45, 228, 108, C_PowerBar);
+            UG_FillFrame(209, 8, 228, 71, C_PowerBar);
             standby_state_written_to_LCD = 0;
             sleep_state_written_to_LCD = 0;
         }
@@ -260,39 +260,39 @@ static void update_graph_display(void) {
     else {
         memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
         format_number_left(convert_temperature(sensor_values.set_temperature), DISPLAY_buffer);
-        LCD_PutStr(140, 45, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
+        LCD_PutStr(140, 8, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
 
         if (cartridge_state == DETACHED) {
-            LCD_PutStr(140, 70, " ---  ", FONT_arial_20X23, C_Text, C_Background);
+            LCD_PutStr(140, 33, " ---  ", FONT_arial_20X23, C_Text, C_Background);
         } else {
             memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
             format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), DISPLAY_buffer);
-            LCD_PutStr(140, 70, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
+            LCD_PutStr(140, 33, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
         }
 
         /* Handle + input voltage + power source (PD shows negotiated power). */
-        draw_graph_info_line(10, 95);
+        draw_graph_info_line(10, 58);
 
-        UG_DrawFrame(288, 44, 310, 109, C_Text);
+        UG_DrawFrame(288, 7, 310, 72, C_Text);
 
         if ((sensor_values.current_state == SLEEP || sensor_values.current_state == EMERGENCY_SLEEP || sensor_values.current_state == HALTED) && !sleep_state_written_to_LCD) {
-            UG_FillFrame(290, 45, 309, 108, C_Highlight);
-            LCD_PutStr(294, 50, "Z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(295, 69, "z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(294, 90, "Z", FONT_arial_17X18, C_Background, C_Highlight);
+            UG_FillFrame(290, 8, 309, 71, C_Highlight);
+            LCD_PutStr(294, 13, "Z", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(295, 32, "z", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(294, 53, "Z", FONT_arial_17X18, C_Background, C_Highlight);
             sleep_state_written_to_LCD = 1;
             standby_state_written_to_LCD = 0;
         }
         else if ((sensor_values.current_state == STANDBY) && !standby_state_written_to_LCD) {
-            UG_FillFrame(290, 45, 309, 108, C_Highlight);
-            LCD_PutStr(294, 50, "S", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(294, 70, "T", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(294, 90, "B", FONT_arial_17X18, C_Background, C_Highlight);
+            UG_FillFrame(290, 8, 309, 71, C_Highlight);
+            LCD_PutStr(294, 13, "S", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(294, 33, "T", FONT_arial_17X18, C_Background, C_Highlight);
+            LCD_PutStr(294, 53, "B", FONT_arial_17X18, C_Background, C_Highlight);
             standby_state_written_to_LCD = 1;
             sleep_state_written_to_LCD = 0;
         }
         else if (sensor_values.current_state == RUN) {
-            UG_FillFrame(290, 45, 309, 108, C_PowerBar);
+            UG_FillFrame(290, 8, 309, 71, C_PowerBar);
             standby_state_written_to_LCD = 0;
             sleep_state_written_to_LCD = 0;
         }
@@ -314,18 +314,18 @@ static void update_display(void) {
     if ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) {
         memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
         format_number_left(convert_temperature(sensor_values.set_temperature), DISPLAY_buffer);
-        LCD_PutStr(19, 70, DISPLAY_buffer, FONT_arial_36X44_NUMBERS, C_Text, C_Background);
+        LCD_PutStr(19, 33, DISPLAY_buffer, FONT_arial_36X44_NUMBERS, C_Text, C_Background);
 
         if (cartridge_state == DETACHED) {
-            LCD_PutStr(15, 160, " ---  ", FONT_arial_36X44_NUMBERS, C_Text, C_Background);
+            LCD_PutStr(15, 117, " ---  ", FONT_arial_36X44_NUMBERS, C_Text, C_Background);
         } else {
             memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
             format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), DISPLAY_buffer);
-            LCD_PutStr(19, 160, DISPLAY_buffer, FONT_arial_36X44_NUMBERS, C_Text, C_Background);
+            LCD_PutStr(19, 117, DISPLAY_buffer, FONT_arial_36X44_NUMBERS, C_Text, C_Background);
         }
 
         /* Handle + input voltage + power source (PD shows negotiated power). */
-        draw_info_lines(11, 235, 255);
+        draw_info_lines(11, 192, 212);
 
         memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
         if (convert_temperature(sensor_values.mcu_temperature) < 99.5f) {
@@ -340,7 +340,7 @@ static void update_display(void) {
         } else {
             sprintf(DISPLAY_buffer, "%d W", (int)sensor_values.max_power_watt);
         }
-        LCD_PutStr(183, 45, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
+        LCD_PutStr(183, 8, DISPLAY_buffer, FONT_arial_17X18, C_Text, C_Background);
 
         memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
         if (flash_values.power_unit == 0) {
@@ -465,31 +465,28 @@ void LCD_draw_main_screen(void) {
          * previous glyphs (menus/banner may have left transparency set). */
         UG_FontSetTransparency(0);
 
-        LCD_PutStr(50, 8, "NONAME", FONT_arial_19X22, C_Header, C_Background);
-        LCD_DrawLine(0, 36, 240, 36, C_Header);
-        LCD_DrawLine(0, 37, 240, 37, C_Header);
-        LCD_DrawLine(0, 38, 240, 38, C_Header);
-
-        LCD_PutStr(19, 45, "Set temp", FONT_arial_20X23, C_Text, C_Background);
-        UG_DrawCircle(128, 76, 5, C_Text);
-        UG_DrawCircle(128, 76, 4, C_Text);
-        UG_DrawCircle(128, 76, 3, C_Text);
+        /* No title bar: the station name line and its header rule ate the top
+         * 40 px. The temperature blocks start right at the top instead. */
+        LCD_PutStr(19, 8, "Set temp", FONT_arial_20X23, C_Text, C_Background);
+        UG_DrawCircle(128, 39, 5, C_Text);
+        UG_DrawCircle(128, 39, 4, C_Text);
+        UG_DrawCircle(128, 39, 3, C_Text);
         if (flash_values.deg_celsius == 1) {
-            LCD_PutStr(135, 70, "C", FONT_arial_36X44_C, C_Text, C_Background);
+            LCD_PutStr(135, 33, "C", FONT_arial_36X44_C, C_Text, C_Background);
         } else {
-            LCD_PutStr(135, 70, "F", FONT_arial_36X44_F, C_Text, C_Background);
+            LCD_PutStr(135, 33, "F", FONT_arial_36X44_F, C_Text, C_Background);
         }
-        LCD_PutStr(19, 135, "Actual temp", FONT_arial_20X23, C_Text, C_Background);
-        UG_DrawCircle(128, 166, 5, C_Text);
-        UG_DrawCircle(128, 166, 4, C_Text);
-        UG_DrawCircle(128, 166, 3, C_Text);
+        LCD_PutStr(19, 92, "Actual temp", FONT_arial_20X23, C_Text, C_Background);
+        UG_DrawCircle(128, 123, 5, C_Text);
+        UG_DrawCircle(128, 123, 4, C_Text);
+        UG_DrawCircle(128, 123, 3, C_Text);
         if (flash_values.deg_celsius == 1) {
-            LCD_PutStr(135, 160, "C", FONT_arial_36X44_C, C_Text, C_Background);
+            LCD_PutStr(135, 117, "C", FONT_arial_36X44_C, C_Text, C_Background);
         } else {
-            LCD_PutStr(135, 160, "F", FONT_arial_36X44_F, C_Text, C_Background);
+            LCD_PutStr(135, 117, "F", FONT_arial_36X44_F, C_Text, C_Background);
         }
-        UG_DrawFrame(11, 129, 187, 211, C_Text);
-        UG_DrawFrame(10, 128, 188, 212, C_Text);
+        UG_DrawFrame(11, 86, 187, 168, C_Text);
+        UG_DrawFrame(10, 85, 188, 169, C_Text);
 
         /* Handle / input voltage / power source are drawn by
          * display_app_tick(); only the static MCU label lives here. */
@@ -526,7 +523,6 @@ void LCD_draw_main_screen(void) {
     else {
         UG_FillScreen(C_Background);
         UG_FontSetTransparency(0);
-        LCD_PutStr(165, 10, "NONAME", FONT_arial_20X23, C_Header, C_Background);
 
         LCD_PutStr(64, 10, "Set temp", FONT_arial_20X23, C_Text, C_Background);
         UG_DrawCircle(173, 41, 5, C_Text);

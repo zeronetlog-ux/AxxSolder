@@ -18,12 +18,12 @@
 #define GRAPH_X0_vertical  38
 #define GRAPH_Y0_vertical  270
 #define GRAPH_WIDTH_vertical  160
-#define GRAPH_HEIGHT_vertical 150
+#define GRAPH_HEIGHT_vertical 185
 
 #define GRAPH_X0_horizontal  38
 #define GRAPH_Y0_horizontal  215
 #define GRAPH_WIDTH_horizontal  245
-#define GRAPH_HEIGHT_horizontal 100
+#define GRAPH_HEIGHT_horizontal 130
 
 uint16_t GRAPH_X0;
 uint16_t GRAPH_Y0;
@@ -141,24 +141,21 @@ void draw_graph_init(void) {
 		GRAPH_WIDTH = GRAPH_WIDTH_vertical;
 		GRAPH_HEIGHT = GRAPH_HEIGHT_vertical;
 
-		LCD_PutStr(53, 8, "AxxSolder", FONT_arial_19X22, C_Header, C_Background);
-		LCD_DrawLine(0,36,240,36,C_Header);
-		LCD_DrawLine(0,37,240,37,C_Header);
-		LCD_DrawLine(0,38,240,38,C_Header);
-
-		LCD_PutStr(10, 45, "Set temp:", FONT_arial_20X23, C_Text, C_Background);
+		/* No title bar: the header block sits right at the top and the plot
+		 * uses the freed height (see GRAPH_HEIGHT_vertical). */
+		LCD_PutStr(10, 8, "Set temp:", FONT_arial_20X23, C_Text, C_Background);
 		if(flash_values.deg_celsius == 1){
-			LCD_PutStr(180, 45, "°C", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 8, "°C", FONT_arial_20X23, C_Text, C_Background);
 		}
 		else{
-			LCD_PutStr(180, 45, "°F", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 8, "°F", FONT_arial_20X23, C_Text, C_Background);
 		}
-		LCD_PutStr(10, 70, "Actual temp:", FONT_arial_20X23, C_Text, C_Background);
+		LCD_PutStr(10, 33, "Actual temp:", FONT_arial_20X23, C_Text, C_Background);
 		if(flash_values.deg_celsius == 1){
-			LCD_PutStr(180, 70, "°C", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 33, "°C", FONT_arial_20X23, C_Text, C_Background);
 		}
 		else{
-			LCD_PutStr(180, 70, "°F", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 33, "°F", FONT_arial_20X23, C_Text, C_Background);
 		}
 
 
@@ -205,28 +202,22 @@ void draw_graph_init(void) {
 		GRAPH_WIDTH = GRAPH_WIDTH_horizontal;
 		GRAPH_HEIGHT = GRAPH_HEIGHT_horizontal;
 
-		LCD_PutStr(90, 8, "AxxSolder", FONT_arial_19X22, C_Header, C_Background);
-		LCD_DrawLine(0,36,310,36,C_Header);
-		LCD_DrawLine(0,37,310,37,C_Header);
-		LCD_DrawLine(0,38,310,38,C_Header);
-
-		LCD_PutStr(10, 45, "Set temp:", FONT_arial_20X23, C_Text, C_Background);
+		/* Same compact header as the portrait view, see above. */
+		LCD_PutStr(10, 8, "Set temp:", FONT_arial_20X23, C_Text, C_Background);
 		if(flash_values.deg_celsius == 1){
-			LCD_PutStr(180, 45, "°C", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 8, "°C", FONT_arial_20X23, C_Text, C_Background);
 		}
 		else{
-			LCD_PutStr(180, 45, "°F", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 8, "°F", FONT_arial_20X23, C_Text, C_Background);
 		}
-		LCD_PutStr(10, 70, "Actual temp:", FONT_arial_20X23, C_Text, C_Background);
+		LCD_PutStr(10, 33, "Actual temp:", FONT_arial_20X23, C_Text, C_Background);
 		if(flash_values.deg_celsius == 1){
-			LCD_PutStr(180, 70, "°C", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 33, "°C", FONT_arial_20X23, C_Text, C_Background);
 		}
 		else{
-			LCD_PutStr(180, 70, "°F", FONT_arial_20X23, C_Text, C_Background);
+			LCD_PutStr(180, 33, "°F", FONT_arial_20X23, C_Text, C_Background);
 		}
 
-
-		//LCD_PutStr(205, 95, "AxxSolder", FONT_arial_17X18, C_Header, C_Background);
 
 		// Time axis labels (X axis, in seconds)
 	    float step_time_sec = ((float)GRAPH_WIDTH / 5.0f) * ((float)DISPLAY_TICK_INTERVAL_MS / 750.0f);
