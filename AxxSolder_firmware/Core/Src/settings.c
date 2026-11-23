@@ -48,7 +48,8 @@ Flash_values default_flash_values = {
     .change_enc_dir                = 0,
     .encoder_step_idx              = 1,  /* index 1 -> step 2 */
     .heat_at_startup               = 0,
-    .pd_profile                    = -1  /* USB-PD: automatic (strongest) */
+    .pd_profile                    = -1, /* USB-PD: automatic (strongest) */
+    .pd_auto_max                   = 0   /* USB-PD: show the mode chooser   */
 };
 
 /* ------------------------------------------------------------------ */

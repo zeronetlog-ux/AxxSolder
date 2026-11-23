@@ -83,6 +83,7 @@ standby_temp=150.00
 ...
 heat_at_startup=0.00
 pd_profile=-1.00
+pd_auto_max=0.00
 ```
 
 - One `key=value` pair per line, CR/LF or LF, `#` or `;` starts a comment.
@@ -110,13 +111,17 @@ matches the settings menu order:
 `detect_nt115`, `power_limit_T245`, `power_limit_T210`, `power_limit_NT115`,
 `power_limit_No_name`, `display_graph`, `delta_t_detection`, `standby_delay`,
 `show_profile_on_tip_change`, `change_enc_dir`, `encoder_step_idx`,
-`heat_at_startup`, `pd_profile`.
+`heat_at_startup`, `pd_profile`, `pd_auto_max`.
 
 `pd_profile` is the USB-PD voltage the station prefers at start-up: `-1` picks
 the most powerful mode the source offers, any other value (e.g. `15`) prefers
 that voltage and falls back to the most powerful mode when the source has no PDO
 there. The list shown at boot is the source's own capability list — the voltage
 and current it advertises for each of its PDOs.
+
+`pd_auto_max` (`1` = on) skips that list: the station reads the offers and
+negotiates the most powerful one right away, so it starts without waiting for a
+button. Holding the encoder while powering up shows the list for that boot.
 
 ---
 

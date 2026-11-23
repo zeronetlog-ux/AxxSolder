@@ -22,3 +22,19 @@ bool boot_request_usb_storage(void)
 
     return true;
 }
+
+bool boot_request_pd_chooser(void)
+{
+    uint32_t held = 0;
+
+    while (held < BOOT_HOLD_MS) {
+        if (HAL_GPIO_ReadPin(SW_1_GPIO_Port, SW_1_Pin) != GPIO_PIN_SET) {
+            return false;   /* released: normal boot */
+        }
+
+        HAL_Delay(BOOT_POLL_MS);
+        held += BOOT_POLL_MS;
+    }
+
+    return true;
+}

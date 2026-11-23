@@ -301,6 +301,14 @@ int main(void)
 	/* Check if user data in flash is valid, if not - write default parameters */
 	settings_init();
 
+	/* With "PD auto max mode" the chooser is skipped; holding the encoder while
+	 * powering up brings it back for this boot. Sampled right after the settings
+	 * are known, while the button is still held. */
+	bool chooser_override = boot_request_pd_chooser();
+	if (chooser_override){
+		buttons_clear_all();         /* the hold is a boot gesture, not a press */
+	}
+
 	/* Load tip profiles from storage */
 	tip_profiles_init(STORAGE_PROFILES_DRIVER);
 
@@ -369,21 +377,35 @@ int main(void)
 	 * the user pick one with the encoder (only a button press confirms). It is
 	 * shown whenever a cable is attached to the controller - also when the
 	 * source offers no modes or the link currently sits at 5 V, so the state is
-	 * always visible. The mode picked here (or the stored/topmost one when the
-	 * chooser just times out) is negotiated afterwards, so opening the window
-	 * costs no PD exchange. */
+	 * always visible. With "PD auto max mode" the window is skipped and the most
+	 * powerful advertised mode is negotiated right away; holding the encoder
+	 * while powering up overrides the setting for that boot. The mode picked
+	 * here (or the stored/default one when the chooser is dismissed) is
+	 * negotiated afterwards, so opening the window costs no PD exchange. */
 	if (pd_cable_attached){
 #ifdef STUSB_DEBUG
 		debug_print_int(DEBUG_INFO,"boot ms (chooser)", (int)HAL_GetTick());
 #endif
-		int8_t chosen = LCD_run_pd_banner();
+		/* Auto-max applies only when the boot gesture did not ask for the
+		 * chooser; every apply below still verifies the result. */
+		bool   auto_max = (flash_values.pd_auto_max > 0.5f) && !chooser_override;
+		int8_t chosen   = -1;
 
-		buttons_clear_all();               /* the tap only ends the chooser */
+		if (!auto_max){
+			chosen = LCD_run_pd_banner();
+			buttons_clear_all();           /* the tap only ends the chooser */
+		}
+		else {
+			debug_print_str(DEBUG_INFO,"PD: auto max mode, chooser skipped");
+		}
 
-		/* A selection wins; otherwise the boot-time default (the stored voltage
-		 * or the most powerful advertised mode) is applied. */
+		/* A selection wins; otherwise the boot-time default is applied: the most
+		 * powerful advertised mode with auto-max, the stored voltage (falling
+		 * back to the most powerful one) without it. */
 		bool   user_choice = (chosen >= 0);
-		int8_t target      = user_choice ? chosen : (int8_t)pd_offer_default;
+		int8_t target      = user_choice ? chosen
+		                   : auto_max     ? ((pd_offer_count > 0u) ? 0 : (int8_t)PD_OFFER_NONE)
+		                   :                (int8_t)pd_offer_default;
 
 		if (target >= 0){
 			if (power_source_apply_offer((uint8_t)target)){

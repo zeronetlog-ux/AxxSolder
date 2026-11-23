@@ -59,6 +59,7 @@ static const SettingsFileField field_table[] = {
     F(encoder_step_idx,              0.0f,    3.0f),
     F(heat_at_startup,               0.0f,    1.0f),
     F(pd_profile,                   -1.0f,   21.0f),  /* -1 = auto, else volts */
+    F(pd_auto_max,                   0.0f,    1.0f),  /* 1 = skip the chooser */
 };
 
 #define FIELD_COUNT (sizeof(field_table) / sizeof(field_table[0]))

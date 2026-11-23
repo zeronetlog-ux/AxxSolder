@@ -92,6 +92,12 @@ ramp wait. A confirmed mode is stored as `pd_profile`; dismissing the window
 applies the stored voltage or the most powerful advertised mode, and a source
 that advertises nothing keeps the contract its controller negotiated on its own.
 
+`PD auto max mode` (MODE menu, `pd_auto_max` in `AXX.CFG`) removes the window
+entirely: the station reads the source's offers and negotiates the most powerful
+one without waiting for input. Holding the encoder while powering the station up
+shows the chooser for that boot, so the setting does not have to be cleared to
+pick another mode once.
+
 A 5 V mode is negotiated through PDO1, whose voltage the specification fixes,
 with the current taken from the source's own PDO. Upstream programmed a second
 5 V PDO and treated the resulting contract as a rejection, so choosing "run on
@@ -365,6 +371,7 @@ To access the user settings the user holds down the encoder button at start-up o
 |MODE|Change Enc. dir.|Changes the direction of the encoder|YES/NO|NO|
 |MODE|Enc. step|Changes amount of steps per encoder tick|1,2,5,10|2|
 |MODE|Heat at startup|If enabled AxxSolder starts to heat at startup|YES/NO|NO|
+|MODE|PD auto max mode|Skip the USB-PD mode chooser and run on the most powerful mode the supply advertises. Hold the encoder while powering up to show the chooser anyway|YES/NO|NO|
 |SYSTEM|-Load Default-|Load default parameters|N/A|N/A|
 |SYSTEM|-Save and Reboot-|Exit and Save|N/A|N/A|
 |SYSTEM|-Exit no Save-|Exit without Save|N/A|N/A|

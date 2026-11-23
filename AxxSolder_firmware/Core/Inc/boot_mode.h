@@ -14,4 +14,12 @@
  */
 bool boot_request_usb_storage(void);
 
+/* Checks, right after reset, whether SW_1 (the encoder) is held down.
+ *
+ * With the "PD auto max mode" setting the boot chooser is normally skipped; this
+ * gesture brings it back for that boot, so the mode can still be picked without
+ * clearing the setting. Returns quickly when the button is not held.
+ */
+bool boot_request_pd_chooser(void);
+
 #endif /* BOOT_MODE_H */

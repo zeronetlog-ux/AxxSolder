@@ -53,6 +53,10 @@ typedef struct {
     float pd_profile;         /* USB-PD: preferred supply voltage in volts
                                * (e.g. 15 => prefer 15 V), -1 = automatic
                                * (most powerful profile the source offers) */
+    float pd_auto_max;        /* USB-PD: 1 = skip the boot chooser and run on
+                               * the most powerful mode the source advertises;
+                               * holding the encoder at power-up shows the
+                               * chooser anyway for that boot */
 } Flash_values;
 
 /* The single live copy of user settings. Read directly from anywhere
