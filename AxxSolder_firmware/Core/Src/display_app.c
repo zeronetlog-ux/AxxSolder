@@ -655,15 +655,6 @@ static uint16_t nvm_current_ma(uint8_t code)
     return (uint16_t)((code * 500u) - 2500u);
 }
 
-static void nvm_hex_line(char *out, size_t len, uint8_t tag, const uint8_t *data, uint8_t count)
-{
-    size_t pos = (size_t)snprintf(out, len, "s%u:", (unsigned)tag);
-
-    for (uint8_t i = 0; (i < count) && (pos + 4u < len); i++) {
-        pos += (size_t)snprintf(&out[pos], len - pos, " %02X", (unsigned)data[i]);
-    }
-}
-
 void LCD_show_pd_apply(float req_v, float req_a, float vbus, uint32_t rdo_raw,
                        uint8_t rdo_pos, float rdo_max_a, float rdo_oper_a,
                        float contract, float limit, const stusb_dpm_trace_t *trace)
@@ -750,14 +741,6 @@ void LCD_show_nvm_dump(const uint8_t *nvm)
                    (unsigned)(v3_mv / 1000u), (unsigned)((v3_mv % 1000u) / 10u),
                    (unsigned)(i3_ma / 1000u), (unsigned)((i3_ma % 1000u) / 10u));
     LCD_PutStr(8, y, line, FONT_arial_12X15, C_Text, C_Background);
-
-    y = (uint16_t)(y + 22u);
-    for (uint8_t sector = 0; sector < STUSB_NVM_SECTORS; sector++) {
-        nvm_hex_line(line, sizeof(line), sector,
-                     &nvm[sector * STUSB_NVM_SECTOR_SIZE], STUSB_NVM_SECTOR_SIZE);
-        LCD_PutStr(8, y, line, FONT_arial_12X15, C_Footer, C_Background);
-        y = (uint16_t)(y + 18u);
-    }
 }
 
 #endif /* STUSB_DEBUG */
@@ -801,8 +784,11 @@ static void draw_pd_banner_body(const uint8_t *list, uint8_t count, uint8_t sel)
     LCD_PutStr(8, 8, "USB-PD SOURCE", FONT_arial_17X18, C_Header, C_Background);
 
     if (count == 0u) {
-        LCD_PutStr(8, y, "no mode accepted", FONT_arial_12X15, C_Warning, C_Background);
-        LCD_PutStr(8, (uint16_t)(y + 16), "(5 V only source)", FONT_arial_12X15, C_Footer, C_Background);
+        LCD_PutStr(8, y, "no modes offered", FONT_arial_12X15, C_Warning, C_Background);
+        LCD_PutStr(8, (uint16_t)(y + 16), (pd_status == PD_STATUS_NO_CAPS)
+                                            ? "(capabilities unreadable)"
+                                            : "(5 V source or no PD)",
+                   FONT_arial_12X15, C_Footer, C_Background);
     }
 
     for (uint8_t i = 0; i < count; i++) {
@@ -816,26 +802,26 @@ static void draw_pd_banner_body(const uint8_t *list, uint8_t count, uint8_t sel)
 
 /* Boot-time USB-PD mode chooser.
  *
- * Shows the profiles the source accepted (probed by power_source_init()) and
- * lets the user pick one with the rotary encoder; any button confirms. Returns
- * the index into pd_offers[] that should be used, or -1 when the source
- * accepted nothing. The banner also closes on its own after
- * PD_BANNER_TIMEOUT_MS without any interaction, keeping the highlighted
- * profile. */
+ * Shows what the source advertised (collected by power_source_init(), whatever
+ * voltage the controller negotiated on its own) and lets the user pick one with
+ * the rotary encoder; any button confirms. Returns the index into pd_offers[] of
+ * the mode that was confirmed, or -1 when the banner closed without a choice
+ * (a button was not pressed within PD_BANNER_TIMEOUT_MS) or the source offered
+ * nothing. main() then applies pd_offer_default, so dismissing the window never
+ * looks like a user selection. */
 int8_t LCD_run_pd_banner(void)
 {
     uint8_t list[PD_OFFER_MAX];
     uint8_t count = 0;
     uint8_t sel   = 0;
-    int8_t  initial = (pd_offer_selected == PD_OFFER_NONE) ? -1 : (int8_t)pd_offer_selected;
 
     /* Collect the accepted profiles, highest power first. */
     for (uint8_t i = 0; i < pd_offer_count; i++) {
         if (!pd_offers[i].accepted) {
             continue;
         }
-        if (i == pd_offer_selected) {
-            sel = count;                 /* start on the profile in use */
+        if ((uint8_t)i == pd_offer_default) {
+            sel = count;                 /* start on the mode that will be used */
         }
         list[count++] = i;
     }
@@ -886,7 +872,7 @@ int8_t LCD_run_pd_banner(void)
     UG_FontSetTransparency(transparency);
 
     if (!confirmed) {
-        return initial;                  /* nothing pressed: do not change mode */
+        return -1;                       /* dismissed: main() applies the default */
     }
 
     return (count > 0u) ? (int8_t)list[sel] : -1;

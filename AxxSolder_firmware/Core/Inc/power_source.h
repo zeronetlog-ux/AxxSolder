@@ -40,16 +40,38 @@ extern pd_status_t pd_status;
 /* Raw REG_DEVICE_ID value from the last detection (0 when the read failed). */
 extern uint8_t pd_chip_id;
 
+/* True when the controller answered and a USB-C cable is attached. Set by
+ * power_source_init(); the contract may still be unapplied at that point (it is
+ * negotiated after the boot chooser), so this - not pd_status - tells the UI
+ * that the USB-PD window belongs on screen. */
+extern bool pd_cable_attached;
+
 /* One fixed-supply mode advertised by the USB-PD source (voltage + its current
  * rating). The list is read from the source itself: a soft reset makes it repeat
  * Source_Capabilities and the STUSB4500 keeps that message in its RX buffer (see
  * stusb_read_source_pdos()). When the message cannot be read, pd_offers[] stays
  * empty and the station runs on the chip's NVM contract (PDO1, 5 V). */
+/* Multiple USB-PD profiles the source advertises are listed in pd_offers[]. */
 typedef struct {
     uint16_t mv;         /* PDO voltage, mV                           */
     uint16_t ma;         /* PDO current rating, mA                    */
     bool     accepted;   /* always true for entries in pd_offers[]     */
 } pd_offer_t;
+
+/* Why the last profile switch did not take effect (see request_offer() in
+ * power_source.c). Surfaced to the user as a short popup. */
+typedef enum {
+    PD_SWITCH_OK = 0,
+    PD_SWITCH_I2C,       /* the controller did not answer                     */
+    PD_SWITCH_REJECTED,  /* the source sent Reject                            */
+    PD_SWITCH_TIMEOUT,   /* no Accept/PS_RDY within the window                */
+    PD_SWITCH_NO_VBUS    /* exchange looked fine, but VBUS stayed at 5 V      */
+} pd_switch_result_t;
+
+extern pd_switch_result_t pd_last_switch;
+
+/* Short text for pd_last_switch, for show_popup(). */
+const char *power_source_switch_error(void);
 
 #define PD_OFFER_MAX 8
 #define PD_OFFER_NONE 0xFF   /* pd_offer_selected: no profile in use (5 V NVM contract) */
@@ -62,10 +84,22 @@ extern uint8_t    pd_offer_count;
  * PD_OFFER_NONE when the source accepted none of them (5 V baseline). */
 extern uint8_t    pd_offer_selected;
 
+/* Index into pd_offers[] applied when the boot chooser closes without a
+ * selection: the stored preference (flash_values.pd_profile) when the source
+ * still offers it, otherwise the most powerful mode. PD_OFFER_NONE when the
+ * source offered nothing. The contract is negotiated from main() after the
+ * chooser, so the window does not wait for the PD exchange. */
+extern uint8_t    pd_offer_default;
+
 /* Switch the link to one of the probed profiles (index into pd_offers[]) and
  * recompute the heater power limit. Returns false when the source refuses it
  * again. Used by the boot-time mode chooser. */
 bool power_source_apply_offer(uint8_t index);
+
+/* No advertised modes: adopt the contract the controller negotiated on its own
+ * from its NVM settings, so its power limit and the displayed source state are
+ * used. Called after the chooser, so the window does not wait for it. */
+void power_source_adopt_contract(void);
 
 /* Boot-time power-source detection. Talks to the STUSB4500 over I2C, waits for
  * the sink to become ready and derives the heater power limit from the contract

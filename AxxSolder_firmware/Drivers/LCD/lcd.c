@@ -509,7 +509,7 @@ void LCD_init(void)
   HAL_Delay(1);
   //LCD_PIN(LCD_RST,SET);
   HAL_GPIO_WritePin(GPIOB, SPI2_RST_Pin, GPIO_PIN_SET);
-  HAL_Delay(200);
+  HAL_Delay(130);   /* ST7789 needs 120 ms after a hardware reset */
 #endif
   UG_Init(&gui, &device);
 #ifndef LCD_LOCAL_FB
@@ -524,7 +524,8 @@ void LCD_init(void)
     LCD_WriteCommand((uint8_t*)&lcd_init_cmd[i+1], lcd_init_cmd[i]);
     i += lcd_init_cmd[i]+2;
   }
-  UG_FillScreen(C_BLACK);               //  Clear screen
+  /* No clear here: every boot path paints the whole screen right after (the PD
+   * chooser or the main screen), and a full fill costs ~65 ms over SPI. */
   LCD_setPower(ENABLE);
   UG_Update();
 }

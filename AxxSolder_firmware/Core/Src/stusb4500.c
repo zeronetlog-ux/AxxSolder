@@ -90,15 +90,14 @@ static void stusb_log_msg(const stusb_msg_t *msg)
 #endif /* STUSB_DEBUG */
 
 HAL_StatusTypeDef stusb_check_connection(){
-	HAL_StatusTypeDef ret;
 	uint8_t chipID = 0;
 
-	ret = stusb_read_register(STUSB_REG_DEVICE_ID, &chipID, 1);
-	stusb_chip_id = chipID;
-
-	if (ret != HAL_OK) {
+	if (stusb_read_register(STUSB_REG_DEVICE_ID, &chipID, 1) != HAL_OK) {
+		stusb_chip_id = 0;
 		return HAL_ERROR;
 	}
+	stusb_chip_id = chipID;
+
 	/* 0x25 = STUSB4500, 0x21 = STUSB4500B: both are valid parts, the B
 	 * revision would otherwise be treated as "no PD controller at all". */
 	if ((chipID == VAL_STUSB4500_ID) || (chipID == VAL_STUSB4500_ID_B)) {
@@ -234,10 +233,13 @@ uint8_t stusb_read_source_pdos(stusb_pdo_t *out, uint8_t max,
 		return 0;
 	}
 
+	/* The list is always asked for actively: a soft reset makes the source
+	 * repeat its Source_Capabilities, so the answer does not depend on what the
+	 * controller happened to leave in its RX buffer during its own plug-in
+	 * negotiation. */
 	for (uint8_t attempt = 0; attempt < attempts; attempt++) {
 		uint32_t deadline;
 
-		/* A soft reset makes the source send its Source_Capabilities again. */
 		if (stusb_soft_reset() != HAL_OK) {
 			stusb_log("soft reset failed\n");
 			return 0;
@@ -295,7 +297,7 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma, stusb_dpm_trac
 	 * power/data roles...); only the voltage and current fields are replaced. */
 	if (stusb_read_register(STUSB_REG_DPM_SNK_PDO1, pdo1, 4) != HAL_OK) {
 		stusb_log("cannot read PDO1\n");
-		return STUSB_CONTRACT_TIMEOUT;
+		return STUSB_CONTRACT_IO;
 	}
 
 	/* 5 V is PDO1: the PD spec fixes its voltage, so only the current is
@@ -310,7 +312,7 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma, stusb_dpm_trac
 	if ((stusb_set_valid_pdo(number) != HAL_OK) ||
 	    (stusb_write_snk_pdo(number, pdo) != HAL_OK)) {
 		stusb_log("request: i2c failed\n");
-		return STUSB_CONTRACT_TIMEOUT;
+		return STUSB_CONTRACT_IO;
 	}
 
 	if (trace != NULL) {
@@ -324,7 +326,7 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma, stusb_dpm_trac
 
 	if (stusb_soft_reset() != HAL_OK) {
 		stusb_log("request: i2c failed\n");
-		return STUSB_CONTRACT_TIMEOUT;
+		return STUSB_CONTRACT_IO;
 	}
 
 	/* Accept, then PS_RDY once the source has moved to the new voltage. The
@@ -368,7 +370,7 @@ stusb_contract_t stusb_request_contract(uint16_t mv, uint16_t ma, stusb_dpm_trac
 	deadline = HAL_GetTick() + STUSB_CONTRACT_SETTLE_MS;
 	do {
 		if (stusb_read_rdo(&rdo) != HAL_OK) {
-			return STUSB_CONTRACT_TIMEOUT;
+			return STUSB_CONTRACT_IO;
 		}
 		if (rdo.b.Object_Pos != 0u) {
 			stusb_log("contract ok\n");

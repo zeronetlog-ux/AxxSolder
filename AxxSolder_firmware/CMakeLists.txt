@@ -68,6 +68,15 @@ if(STUSB_DEBUG)
     target_compile_definitions(${EXECUTABLE} PRIVATE "STUSB_DEBUG")
 endif()
 
+# Diagnostic build only: show the controller's own NVM settings on the panel at
+# boot (sectors 3/4 hold the sink PDOs it negotiates from, so a board that stays
+# at 5 V can be compared with a known-good one). Kept behind its own option
+# because the screen does not fit into a plain --debug image.
+option(STUSB_NVM_DUMP "Show the STUSB4500 NVM settings at boot (STUSB_DEBUG builds)" OFF)
+if(STUSB_NVM_DUMP)
+    target_compile_definitions(${EXECUTABLE} PRIVATE "STUSB_NVM_DUMP")
+endif()
+
 # Boot without touching the PD link at all: no soft reset, no capability read,
 # no contract request - the controller keeps the contract it negotiated from its
 # own NVM. Used to tell a source that dislikes the station's PD activity (a

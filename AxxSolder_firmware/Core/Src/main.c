@@ -294,7 +294,9 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	HAL_Delay(200);
+	/* Short settle time for the power rails and the free-running ADC (the DMA
+	 * fills its buffer continuously); the long wait only delayed the screen. */
+	HAL_Delay(50);
 
 	/* Check if user data in flash is valid, if not - write default parameters */
 	settings_init();
@@ -306,6 +308,9 @@ int main(void)
 	LCD_init();
 
 	LCD_SetRotation(flash_values.screen_rotation);
+#ifdef STUSB_DEBUG
+	debug_print_int(DEBUG_INFO,"boot ms (lcd)", (int)HAL_GetTick());
+#endif
 
 	/* Apply encoder direction setting */
 	if(flash_values.change_enc_dir == 1){
@@ -349,37 +354,71 @@ int main(void)
 
 	/* Initiate PID controller */
 	controller_init();
+#ifdef STUSB_DEBUG
+	debug_print_int(DEBUG_INFO,"boot ms (filters)", (int)HAL_GetTick());
+#endif
 
-	/* check STUSB4500 */
+	/* check STUSB4500: probe only - the contract is negotiated after the
+	 * chooser, see below, so the window does not wait for the PD exchange */
 	power_source_init();
+#ifdef STUSB_DEBUG
+	debug_print_int(DEBUG_INFO,"boot ms (pd probe)", (int)HAL_GetTick());
+#endif
 
-	/* Boot-time USB-PD mode chooser: lists the modes discovered on the source
-	 * and lets the user pick one with the encoder (only a button press
-	 * confirms). A choice other than the most powerful mode is stored in flash
-	 * as the preferred voltage, so the next start negotiates it right away;
-	 * picking the topmost entry keeps the selection automatic. */
-	if ((power_source == POWER_USB) && (pd_offer_count > 0)){
+	/* Boot-time USB-PD mode chooser: lists what the source advertises and lets
+	 * the user pick one with the encoder (only a button press confirms). It is
+	 * shown whenever a cable is attached to the controller - also when the
+	 * source offers no modes or the link currently sits at 5 V, so the state is
+	 * always visible. The mode picked here (or the stored/topmost one when the
+	 * chooser just times out) is negotiated afterwards, so opening the window
+	 * costs no PD exchange. */
+	if (pd_cable_attached){
+#ifdef STUSB_DEBUG
+		debug_print_int(DEBUG_INFO,"boot ms (chooser)", (int)HAL_GetTick());
+#endif
 		int8_t chosen = LCD_run_pd_banner();
 
 		buttons_clear_all();               /* the tap only ends the chooser */
 
-		if ((chosen >= 0) && ((uint8_t)chosen != pd_offer_selected)){
-			if (power_source_apply_offer((uint8_t)chosen)){
-				/* Remember the chosen voltage (0 .. 21 V); picking the most
-				 * powerful entry keeps the selection automatic. */
-				flash_values.pd_profile = (chosen == 0)
-					? -1.0f
-					: ((float)pd_offers[(uint8_t)chosen].mv / 1000.0f);
-				settings_save();
+		/* A selection wins; otherwise the boot-time default (the stored voltage
+		 * or the most powerful advertised mode) is applied. */
+		bool   user_choice = (chosen >= 0);
+		int8_t target      = user_choice ? chosen : (int8_t)pd_offer_default;
+
+		if (target >= 0){
+			if (power_source_apply_offer((uint8_t)target)){
+				if (user_choice){
+					/* Remember the chosen voltage (0 .. 21 V); picking the most
+					 * powerful entry keeps the selection automatic. */
+					flash_values.pd_profile = (target == 0)
+						? -1.0f
+						: ((float)pd_offers[(uint8_t)target].mv / 1000.0f);
+					settings_save();
+				}
 
 				/* The new contract changes the power the source can deliver, so
 				 * the heater limit has to be recomputed - otherwise the station
 				 * keeps running (and reporting) the limit of the previous mode. */
 				handle_apply_settings();
 			}
-		}
+			else {
+				/* The controller/source did not deliver the mode: say why instead
+				 * of silently staying on the old contract. */
+				show_popup((char *)power_source_switch_error());
 
-		UG_FillScreen(C_Background);
+				/* ... and keep running on the contract the controller negotiated
+				 * on its own, so the power limit matches what is actually there. */
+				power_source_adopt_contract();
+			}
+		}
+		else {
+			/* The source advertised nothing: keep the contract the controller
+			 * negotiated on its own from its NVM. */
+			power_source_adopt_contract();
+		}
+#ifdef STUSB_DEBUG
+		debug_print_int(DEBUG_INFO,"boot ms (pd apply)", (int)HAL_GetTick());
+#endif
 	}
 
 	/* Draw the main screen decoration */
@@ -750,7 +789,9 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x40B285C2;
+  /* 400 kHz fast mode for the STUSB4500 (I2C clock = 170 MHz, PRESC = /2):
+   * SCL low ~1.31 us, SCL high ~1.19 us, data setup ~118 ns. */
+  hi2c1.Init.Timing = 0x1092646E;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;

@@ -4,6 +4,7 @@
 #include "stm32g4xx_hal.h"
 #include "stdbool.h"
 
+/* 7-bit I2C address of the controller on this board (ADDR strap). */
 #define STUSB4500_ADDR         0x28
 
 #define VAL_STUSB4500_ID   0x25   /* DEVICE_ID of the production part      */
@@ -58,7 +59,8 @@ typedef struct {
 typedef enum {
 	STUSB_CONTRACT_OK = 0,
 	STUSB_CONTRACT_REJECTED,           /* source said Reject, or fell back    */
-	STUSB_CONTRACT_TIMEOUT             /* no answer within the window         */
+	STUSB_CONTRACT_TIMEOUT,            /* no answer within the window         */
+	STUSB_CONTRACT_IO                  /* the controller itself did not answer */
 } stusb_contract_t;
 
 /* What happened to the sink PDO registers during a request - read back right

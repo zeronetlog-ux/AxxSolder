@@ -75,20 +75,35 @@ against the object count) and uses the fixed PDOs exactly as advertised:
   RDO reports a position, and the voltage is waited for before the contract is
   measured, so a mode change no longer reports the previous mode's numbers.
 
-### 5 V sources are left alone
+### The mode list does not depend on the controller's own profile
 The controller negotiates a contract from its own NVM as soon as the cable is
-plugged in, before the firmware runs, so the bus voltage says what is attached:
-above 5 V it is a supply that speaks PD and has headroom to gain, at 5 V it is a
-plain 5 V source or a laptop port. Touching the link during boot makes the latter
-restart the station in a loop - a MacBook's USB-C port does, while the same
-station behind a USB hub (which does no PD at all) never did. So at 5 V nothing
-is written and nothing is reset: the contract the controller negotiated stands,
-and only the power limit is derived from it.
+plugged in, before the firmware runs - so on a board whose NVM advertises only
+the 5 V default the station would never see the higher modes. The firmware
+therefore reads the source's capabilities on every boot, whatever voltage the
+link came up at, and the chooser is shown whenever a cable is attached (also
+when the source offers no modes, so that state stays visible). The list is
+always requested actively: a PD soft reset makes the source repeat its
+`Source_Capabilities`, so the answer does not depend on what the controller left
+in its RX buffer during its own plug-in negotiation.
+
+The contract is negotiated *after* the chooser closes, not before it opens:
+opening the window costs the capability exchange only, not the PS_RDY/voltage
+ramp wait. A confirmed mode is stored as `pd_profile`; dismissing the window
+applies the stored voltage or the most powerful advertised mode, and a source
+that advertises nothing keeps the contract its controller negotiated on its own.
 
 A 5 V mode is negotiated through PDO1, whose voltage the specification fixes,
 with the current taken from the source's own PDO. Upstream programmed a second
 5 V PDO and treated the resulting contract as a rejection, so choosing "run on
 5 V" silently fell back to a stale 20 V profile.
+
+Every request is verified: the measured bus voltage has to reach the requested
+mode, and a link that comes up with less current than the source offers for
+that mode is asked again once. A switch that does not take effect says why
+(`PD: VBUS 5V`, `PD: REJECTED`, `PD: NO REPLY`, `PD: I2C FAIL`) instead of
+silently keeping the old contract. A controller whose NVM keeps overriding the
+runtime PDO still needs its NVM programmed - the firmware cannot change what the
+chip negotiated before it started.
 
 ### Power limit and display
 The heater budget is the granted contract minus about 1 W for the station itself
@@ -105,7 +120,13 @@ could not be read.
 STM32CubeIDE - newest wins), refuses a cmake older than the 3.29 the project
 asks for and forwards extra arguments to cmake. `--clean`, `BUILD_DIR=...`,
 `--debug` (USB-PD trace on USART1, 256000 8N1) and `--no-pd` (boot without
-touching the PD link, for diagnostics) are supported.
+touching the PD link, for diagnostics) are supported. With `--debug`,
+`-DSTUSB_NVM_DUMP=ON` additionally shows the controller's own NVM settings on
+the panel at boot (compare a station that stays at 5 V with a known-good one).
+The `--debug` image also logs boot milestones as `boot ms (lcd|filters|pd
+probe|chooser|pd apply)` numbers, which is how the startup timing is measured.
+Switch diagnostic flags with `--clean`: the compile definitions are global, and
+an incremental build can keep the previous set.
 
 `AxxSolder_firmware/tools/flash_dfu.sh` wraps the DFU update described below:
 `--wait N` catches the board while it is being plugged in, `FLASHER=dfu|cli`
@@ -138,7 +159,7 @@ the register sequences; nothing in the firmware build uses it.
 - When the handle is put into the stand (connected to Stand_sense) AxxSolder goes into "Standby mode". On the portable version an aluminium plate is mounted in the case and allows the AxxSolder to go into Standby mode when the cartridge or handle rests against it. After 10 min in Standby mode AxxSolder goes into "Sleep mode" and heating is completely turned off. This is similar to what JBC calls [Sleep and Hibernation](https://www.jbctools.com/intelligent-heat-management.html).  
 - If AxxSolder is left in normal running mode for longer than 30 min, the station automatically goes into sleep mode after 30 min as a safety feature.  
 - Should the temperature ever go higher than 490 °C overheating is detected and the station goes into sleep mode in order to protect the tip.
-- USB-PD sources are read, not probed: the source's `Source_Capabilities` message is taken as it comes (a PD soft reset makes the charger repeat it), so the modes on screen are its own voltages and currents. Above 5 V the most powerful advertised mode is negotiated once and the iron output power is limited to that contract; a 5 V link (plain 5 V supply, USB hub, laptop port) is left exactly as the controller negotiated it, because renegotiating those restarts the station (see [Changes in this fork](#changes-in-this-fork)). Turn the knob during the list to run on another mode and press a button to remember the voltage (`pd_profile`); picking the topmost entry keeps the selection automatic.
+- USB-PD sources are read, not probed: the source's `Source_Capabilities` message is taken as it comes (a PD soft reset makes the charger repeat it), so the modes on screen are its own voltages and currents. The capabilities are read on every boot regardless of the voltage the controller negotiated on its own, and the chooser is shown whenever a USB-C cable is attached - so the user always picks from what the supply can deliver, not from the controller's NVM profile. The most powerful advertised mode (or the remembered voltage) is negotiated at boot; turn the knob during the list to run on another mode and press a button to remember the voltage (`pd_profile`); picking the topmost entry keeps the selection automatic. Each switch is verified against the measured bus voltage, and a failed one says why (`PD: VBUS 5V`, `PD: REJECTED`, `PD: NO REPLY`, `PD: I2C FAIL`).
 - The maximum power output is displayed at the top of the power bar graph.
 - User settings are stored in non-volatile flash and can be configured via a settings menu described in [SETTINGS](#settings). They can also be edited as a text file over USB, see [USB storage mode](#usb-storage-mode).
 - The two buttons are used to store temperature presets, e.g. 330 °C and 430 °C. Both preset temperatures are configurable in the settings menu. The stored preset temperature can be updated to the current set temperature by long-pressing the preset button.
