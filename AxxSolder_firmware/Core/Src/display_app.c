@@ -1,4 +1,5 @@
 #include "display_app.h"
+#include "display_banner.h"
 #include "app_colors.h"   /* AxxSolder UI colour palette */
 #include "main.h"
 #include "util.h"
@@ -1073,6 +1074,7 @@ static bool display_app_uses_graph_screen(void)
  * settings/preset change). */
 void display_app_draw_screen(void)
 {
+    display_banner_abort();
 #if defined(LCD_240X320)
     if (alt_view) {
         alt_draw_static();
@@ -1372,6 +1374,7 @@ int8_t LCD_run_pd_banner(void)
 
 void display_app_tick(void){
 	if(popup_shown == 1){
+		display_banner_abort();
 		if(HAL_GetTick() - previous_millis_popup >= POPUP_DWELL_MS){
 			popup_shown = 0;
 
@@ -1407,11 +1410,16 @@ void display_app_tick(void){
 					               (uint16_t) graf_power,
 					               (uint16_t) sensor_values.set_temperature);
 				}
-				if (alt_view) {
-					alt_update_display();
-				} else {
-					draw_graph_update();
-					update_graph_display();
+			}
+			display_banner_tick();
+			if (!display_banner_active()) {
+				if (display_app_uses_graph_screen()){
+					if (alt_view) {
+						alt_update_display();
+					} else {
+						draw_graph_update();
+						update_graph_display();
+					}
 				}
 			}
 #else

@@ -23,6 +23,9 @@
 #define C_JbcGray          0xA514   /* secondary text (Sel. ...)          */
 #define C_JbcGrayLight     0xBDF7   /* lighter secondary text (Sel. ...)  */
 #define C_TempActive       0x559A   /* active tip temperature: 85,176,215 */
+#define C_BannerBlue       0x0A5F   /* opaque encoder banner fill          */
+#define C_BannerBlueHi     0x1D9F   /* selected preset tile fill          */
+#define C_BannerBlueEdge   0x3DDF   /* banner / tile outlines             */
 
 #endif /* __APP_COLORS_H */
 

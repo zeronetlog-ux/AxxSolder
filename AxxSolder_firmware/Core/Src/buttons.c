@@ -5,6 +5,7 @@
 #include "buzzer.h"
 #include "menu_settings.h"
 #include "display_app.h"
+#include "display_banner.h"
 #include "graph.h"
 #include "settings.h"
 
@@ -92,7 +93,8 @@ static void buttons_toggle_heating(void){
 
 void buttons_handle(void){
 	if(buttons_take_press(BTN_1)){
-		/* Encoder click: reserved, currently does nothing. */
+		/* Encoder click: set-temperature banner / preset picker. */
+		display_banner_encoder_click();
 	}
 
 	if(buttons_take_long_press(BTN_1)){

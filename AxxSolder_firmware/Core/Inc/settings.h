@@ -59,6 +59,8 @@ typedef struct {
                                * chooser anyway for that boot */
     float graph_timebase;     /* Graph time base: index into
                                * {0.5, 1, 2, 5, 10} seconds per division */
+    float preset_temp_3;
+    float preset_temp_4;
 } Flash_values;
 
 /* The single live copy of user settings. Read directly from anywhere

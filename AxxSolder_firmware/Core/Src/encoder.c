@@ -2,6 +2,7 @@
 #include "main.h"
 #include "util.h"
 #include "buzzer.h"
+#include "display_banner.h"
 
 extern TIM_HandleTypeDef htim2;
 extern uint8_t custom_temperature_on;
@@ -40,6 +41,12 @@ void encoder_read_set_temperature(void){
 
 		int32_t detents = delta / 2;             /* 2 counts per detent */
 		if(detents != 0){
+			if(display_banner_preset_active()){
+				/* The knob is steering the preset tiles: consume the movement
+				   but leave the set temperature alone. */
+				enc_last = cnt;
+				return;
+			}
 			if(detents > 20 || detents < -20){
 				/* Implausibly large jump for a hand-turned encoder in one
 				   10 ms tick - e.g. returning from a menu that repurposed
