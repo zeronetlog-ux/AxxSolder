@@ -107,7 +107,8 @@ void buttons_handle(void){
 			encoder_add(+5);
 		}
 		else{
-			encoder_set_count((uint16_t)flash_values.preset_temp_1);
+			/* Toggle between the graph view and the gauge dashboard. */
+			display_app_toggle_view();
 		}
 	}
 	if(buttons_take_long_press(BTN_2)){

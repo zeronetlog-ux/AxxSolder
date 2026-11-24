@@ -35,10 +35,14 @@ extern uint8_t standby_state_written_to_LCD;
 void display_app_tick(void);
 
 /* Draw the static layout of the active screen (boot, popup dismiss,
- * preset/settings change):
- *   - portrait: the JBC-style graph screen (the station's main screen)
- *   - landscape: the legacy text screen */
+ * preset/settings change). On 240x320 panels this is either the JBC graph
+ * view or the gauge dashboard, whichever BTN_2 selected last. */
 void display_app_draw_screen(void);
+
+/* Switch between the graph view and the gauge dashboard (big tip
+ * temperature + power gauge + info pane). 240x320 panels only; no-op on
+ * other geometries. Invoked from the BTN_2 short press. */
+void display_app_toggle_view(void);
 
 /* Show a transient orange popup with the given text. Auto-dismisses
  * after the popup interval. */

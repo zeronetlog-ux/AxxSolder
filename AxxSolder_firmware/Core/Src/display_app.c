@@ -328,14 +328,302 @@ static void update_graph_display(void)
     graph_readout_valid = 1;
 }
 
+/* ------------------------------------------------------------------ */
+/* Alternative view: big tip temperature, power gauge, info pane      */
+/* ------------------------------------------------------------------ */
+
+static uint8_t alt_view = 0;
+
+typedef struct {
+    uint16_t big_x, big_y, sel_y;
+    uint16_t div_x, div_y;
+    uint16_t info_x, info_value_x, info_y0, info_pitch;
+    uint16_t cx, cy, r;
+    uint16_t title_x, title_y, value_y;
+    uint16_t s25_x, s25_y, s75_x, s75_y;
+} alt_layout_t;
+
+static const alt_layout_t alt_portrait = {
+    .big_x = 61, .big_y = 25, .sel_y = 85,
+    .div_x = 120, .div_y = 160,
+    .info_x = 126, .info_value_x = 168, .info_y0 = 180, .info_pitch = 30,
+    .cx = 60, .cy = 300, .r = 50,
+    .title_x = 4, .title_y = 165, .value_y = 195,
+    .s25_x = 2, .s25_y = 302, .s75_x = 87, .s75_y = 302,
+};
+
+static const alt_layout_t alt_landscape = {
+    .big_x = 101, .big_y = 20, .sel_y = 75,
+    .div_x = 160, .div_y = 120,
+    .info_x = 170, .info_value_x = 208, .info_y0 = 140, .info_pitch = 30,
+    .cx = 80, .cy = 225, .r = 48,
+    .title_x = 4, .title_y = 125, .value_y = 148,
+    .s25_x = 2, .s25_y = 190, .s75_x = 127, .s75_y = 190,
+};
+
+static alt_layout_t alt;
+static uint8_t gauge_pct = 0xFF;
+
+static void alt_draw_gauge(uint8_t pct);
+
+static void alt_select_layout(void)
+{
+    alt = ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2))
+        ? alt_portrait : alt_landscape;
+}
+
+static uint16_t alt_screen_width(void)
+{
+    return ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 240 : 320;
+}
+
+static uint16_t alt_screen_height(void)
+{
+    return ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 320 : 240;
+}
+
+static void alt_draw_static(void)
+{
+    const uint16_t sw = alt_screen_width();
+    const uint16_t sh = alt_screen_height();
+    static const char *names[3] = {"Tip", "Vin", "Pwr"};
+
+    alt_select_layout();
+    UG_FillScreen(C_Background);
+    UG_FontSetTransparency(0);
+
+    UG_DrawLine(0, alt.div_y, sw - 1, alt.div_y, C_JbcGrid);
+    UG_DrawLine(alt.div_x, alt.div_y + 1, alt.div_x, sh - 1, C_JbcGrid);
+
+    for (uint8_t i = 0; i < 3; i++) {
+        uint16_t y = (uint16_t)(alt.info_y0 + (i * alt.info_pitch));
+
+        LCD_PutStr(alt.info_x, y, (char *)names[i], FONT_arial_17X18, C_Text, C_Background);
+        if (i) {
+            draw_dashed_line_fillframe(alt.info_x, (int16_t)(y - 5), (int16_t)(sw - 6),
+                                       (int16_t)(y - 5), C_JbcGrid, 2, 2, 1);
+        }
+    }
+
+    display_app_graph_invalidate();
+    gauge_pct = 0xFF;
+}
+
+static void alt_update_display(void)
+{
+    const uint16_t sw = alt_screen_width();
+    const char unit = (flash_values.deg_celsius == 1) ? 'C' : 'F';
+    char info[4][20];
+    char ub[2] = { unit, 0 };
+    uint8_t detached = (uint8_t)(cartridge_state == DETACHED);
+    uint8_t celsius  = (uint8_t)(flash_values.deg_celsius == 1);
+    uint8_t temp_mode;
+    uint16_t temp_color;
+    int set_temp = (int)convert_temperature(sensor_values.set_temperature);
+    int tip_temp = detached ? -1000
+                            : (int)convert_temperature(sensor_values.thermocouple_temperature_filtered);
+
+    if (sensor_values.current_state == RUN) {
+        temp_mode = 0;
+        temp_color = C_Text;
+    } else if ((sensor_values.current_state == STANDBY) ||
+               (sensor_values.current_state == PRESTANDBY)) {
+        temp_mode = 1;
+        temp_color = C_Header;
+    } else {
+        temp_mode = 2;
+        temp_color = C_TempActive;
+    }
+
+    alt_select_layout();
+    build_graph_info(info);
+
+    /* Large actual tip temperature, centred in the upper half. */
+    {
+        const int field_w = 99;
+        const int group_w = field_w + 18;
+        const int x = alt.big_x;
+        bool state_changed = !graph_readout_valid ||
+                             (graph_readout.detached != detached) ||
+                             (graph_readout.celsius != celsius) ||
+                             (graph_readout.temp_mode != temp_mode);
+
+        if (state_changed) {
+            UG_FillFrame((uint16_t)(x - 2), (uint16_t)(alt.big_y - 2),
+                         (uint16_t)(x + group_w), (uint16_t)(alt.big_y + 50), C_Background);
+            if (detached) {
+                LCD_PutStr((uint16_t)(x + 20), alt.big_y, "---",
+                           FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+            } else {
+                char text[8];
+
+                format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), text);
+                LCD_PutStr((uint16_t)x, alt.big_y, text,
+                           FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+                UG_DrawCircle(x + field_w + 5, alt.big_y + 6, 2, temp_color);
+                UG_DrawCircle(x + field_w + 5, alt.big_y + 6, 1, temp_color);
+                LCD_PutStr((uint16_t)(x + field_w + 9), (uint16_t)(alt.big_y + 2), ub,
+                           FONT_arial_12X15, temp_color, C_Background);
+            }
+            graph_readout.tip_temp = (int16_t)tip_temp;
+            graph_readout.detached = detached;
+            graph_readout.celsius  = celsius;
+            graph_readout.temp_mode = temp_mode;
+        } else if (!detached && (graph_readout.tip_temp != tip_temp)) {
+            char text[8];
+
+            format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), text);
+            LCD_PutStr((uint16_t)x, alt.big_y, text,
+                       FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+            graph_readout.tip_temp = (int16_t)tip_temp;
+        }
+    }
+
+    /* Selected temperature, centred under the big number. */
+    if (!graph_readout_valid || (graph_readout.set_temp != set_temp)) {
+        const int group_w = 151;
+        const int x = (sw - group_w) / 2;
+        char text[32];
+
+        UG_FillFrame((uint16_t)x, (uint16_t)(alt.sel_y - 2),
+                     (uint16_t)(x + group_w), (uint16_t)(alt.sel_y + 18), C_Background);
+        (void)snprintf(text, sizeof(text), "Sel. temp. %3d ", set_temp);
+        LCD_PutStr((uint16_t)x, alt.sel_y, text, FONT_arial_17X18, C_JbcGray, C_Background);
+        readout_deg_c(x + 135, alt.sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
+        graph_readout.set_temp = (int16_t)set_temp;
+    }
+
+    /* Info pane values (Tip / Vin / Pwr). */
+    if (!graph_readout_valid || (memcmp(graph_readout.info, info, sizeof(info)) != 0)) {
+        for (uint8_t i = 0; i < 3; i++) {
+            uint16_t y = (uint16_t)(alt.info_y0 + (i * alt.info_pitch));
+
+            if (!graph_readout_valid ||
+                (memcmp(graph_readout.info[i], info[i], sizeof(info[i])) != 0)) {
+                UG_FillFrame(alt.info_value_x, y, (uint16_t)(sw - 6),
+                             (uint16_t)(y + 14), C_Background);
+                LCD_PutStr(alt.info_value_x, y, info[i], FONT_arial_17X18, C_Text, C_Background);
+            }
+        }
+        memcpy(graph_readout.info, info, sizeof(info));
+    }
+
+    /* Power gauge. */
+    {
+        uint8_t pct = (uint8_t)clamp(sensor_values.requested_power_filtered * 100.0f / PID_MAX_OUTPUT,
+                                     0.0f, 100.0f);
+
+        if (!graph_readout_valid || (pct != gauge_pct)) {
+            alt_draw_gauge(pct);
+            gauge_pct = pct;
+        }
+    }
+
+    graph_readout_valid = 1;
+}
+
+/* sin(deg) * 255 for 0..90 degrees (one byte per entry). */
+static const uint8_t gauge_sin_tab[91] = {
+    0, 4, 9, 13, 18, 22, 27, 31, 35, 40, 44, 49, 53, 57, 62, 66, 70, 75,
+    79, 83, 87, 91, 96, 100, 104, 108, 112, 116, 120, 124, 127, 131, 135,
+    139, 143, 146, 150, 153, 157, 160, 164, 167, 171, 174, 177, 180, 183,
+    186, 190, 192, 195, 198, 201, 204, 206, 209, 211, 214, 216, 219, 221,
+    223, 225, 227, 229, 231, 233, 235, 236, 238, 240, 241, 243, 244, 245,
+    246, 247, 248, 249, 250, 251, 252, 253, 253, 254, 254, 254, 255, 255,
+    255, 255,
+};
+
+static int16_t gauge_sin(int deg)
+{
+    return (deg <= 90) ? (int16_t)gauge_sin_tab[deg] : (int16_t)gauge_sin_tab[180 - deg];
+}
+
+static int16_t gauge_cos(int deg)
+{
+    return (deg <= 90) ? (int16_t)gauge_sin_tab[90 - deg] : -(int16_t)gauge_sin_tab[deg - 90];
+}
+
+static void alt_draw_gauge(uint8_t pct)
+{
+    const uint16_t sh = alt_screen_height();
+    const uint8_t side_w = 31;
+    const uint8_t side_h = 14;
+    char b[8];
+    int x;
+    int w;
+
+    /* Clear the left half of the bottom pane. */
+    UG_FillFrame(0, (uint16_t)(alt.div_y + 1), (uint16_t)(alt.div_x - 1),
+                 (uint16_t)(sh - 1), C_Background);
+
+    LCD_PutStr(alt.title_x, alt.title_y, "Power", FONT_arial_17X18, C_Text, C_Background);
+
+    (void)snprintf(b, sizeof(b), "%u%%", (unsigned)pct);
+    w = (pct >= 100) ? 60 : ((pct >= 10) ? 45 : 28);
+    x = (int)alt.cx - (w / 2);
+    LCD_PutStr((uint16_t)x, alt.value_y, b, FONT_arial_20X23, C_Text, C_Background);
+
+    for (int deg = 0; deg <= 180; deg++) {
+        int px = (int)alt.cx + ((int)alt.r * gauge_cos(deg)) / 255;
+        int py = (int)alt.cy - ((int)alt.r * gauge_sin(deg)) / 255;
+
+        UG_DrawPixel((int16_t)px, (int16_t)py, C_Text);
+    }
+
+    for (int i = 0; i <= 10; i++) {
+        int deg = i * 18;
+        int c = gauge_cos(deg);
+        int s = gauge_sin(deg);
+        int x1 = (int)alt.cx + (((int)alt.r - 8) * c) / 255;
+        int y1 = (int)alt.cy - (((int)alt.r - 8) * s) / 255;
+        int x2 = (int)alt.cx + ((int)alt.r * c) / 255;
+        int y2 = (int)alt.cy - ((int)alt.r * s) / 255;
+
+        draw_line_with_thickness(x1, y1, x2, y2, C_Text, 1);
+    }
+
+    /* Labels sit on top of the arc; clear a small patch behind them. */
+    UG_FillFrame((uint16_t)(alt.s25_x - 1), (uint16_t)(alt.s25_y - 1),
+                 (uint16_t)(alt.s25_x + side_w + 1), (uint16_t)(alt.s25_y + side_h), C_Background);
+    LCD_PutStr(alt.s25_x, alt.s25_y, "25%", FONT_arial_12X15, C_Text, C_Background);
+    UG_FillFrame((uint16_t)(alt.s75_x - 1), (uint16_t)(alt.s75_y - 1),
+                 (uint16_t)(alt.s75_x + side_w + 1), (uint16_t)(alt.s75_y + side_h), C_Background);
+    LCD_PutStr(alt.s75_x, alt.s75_y, "75%", FONT_arial_12X15, C_Text, C_Background);
+
+    {
+        int deg = 180 - ((int)pct * 180) / 100;
+        int nx = (int)alt.cx + (((int)alt.r - 14) * gauge_cos(deg)) / 255;
+        int ny = (int)alt.cy - (((int)alt.r - 14) * gauge_sin(deg)) / 255;
+
+        draw_line_with_thickness((int)alt.cx, (int)alt.cy, nx, ny, C_Text, 3);
+        UG_DrawCircle(alt.cx, alt.cy, 5, C_TempActive);
+        UG_DrawCircle(alt.cx, alt.cy, 4, C_TempActive);
+        UG_DrawCircle(alt.cx, alt.cy, 3, C_TempActive);
+    }
+}
+
+void display_app_toggle_view(void)
+{
+    alt_view ^= 1u;
+    display_app_graph_invalidate();
+    display_app_draw_screen();
+}
+
 #else
 /* Other panel geometries keep the legacy text screen; nothing to cache. */
 void display_app_graph_invalidate(void)
 {
 }
+
+void display_app_toggle_view(void)
+{
+}
 #endif /* LCD_240X320 */
 
 
+#if !defined(LCD_240X320)
+/* Legacy text main screen. The 240x320 stations always use the JBC graph /
+ * gauge screens, so this code is compiled out there to save flash. */
 static void update_standby_sleep_display(void) {
     uint32_t now = HAL_GetTick();
     uint32_t countdown_ms = 0;
@@ -666,8 +954,10 @@ static void LCD_draw_main_screen(void) {
      * sleep_state_written_to_LCD as needed to trigger overlay redraw. */
 }
 
-/* The JBC-style graph screen is the station's main screen in portrait;
- * the old text screen survives only as the landscape fallback. */
+#endif /* !LCD_240X320 */
+
+/* The JBC-style graph screen is the station's main screen; the gauge
+ * dashboard is an alternative view of the same 240x320 station. */
 static bool display_app_uses_graph_screen(void)
 {
 #if defined(LCD_240X320)
@@ -681,11 +971,15 @@ static bool display_app_uses_graph_screen(void)
  * settings/preset change). */
 void display_app_draw_screen(void)
 {
-    if (display_app_uses_graph_screen()) {
-        draw_graph_init();
+#if defined(LCD_240X320)
+    if (alt_view) {
+        alt_draw_static();
     } else {
-        LCD_draw_main_screen();
+        draw_graph_init();
     }
+#else
+    LCD_draw_main_screen();
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -1011,14 +1305,18 @@ void display_app_tick(void){
 					               (uint16_t) graf_power,
 					               (uint16_t) sensor_values.set_temperature);
 				}
-				draw_graph_update();
-				update_graph_display();
+				if (alt_view) {
+					alt_update_display();
+				} else {
+					draw_graph_update();
+					update_graph_display();
+				}
 			}
-			else
-#endif
+#else
 			{
 				update_display();
 			}
+#endif
 
 			previous_millis_display = HAL_GetTick();
 		}
