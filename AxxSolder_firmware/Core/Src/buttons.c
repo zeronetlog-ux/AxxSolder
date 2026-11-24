@@ -74,8 +74,7 @@ void buttons_clear_all(void) {
 /* Main-loop handler                                                  */
 /* ------------------------------------------------------------------ */
 
-/* Start/stop heating. Was the encoder click; now BTN_2 in the two-button
- * layout (the encoder click selects the dashboard view). */
+/* Start/stop heating, on BTN_3 in the two-button layout. */
 static void buttons_toggle_heating(void){
 	if (sensor_values.current_state == RUN){
 		change_state(HALTED);
@@ -93,14 +92,7 @@ static void buttons_toggle_heating(void){
 
 void buttons_handle(void){
 	if(buttons_take_press(BTN_1)){
-		/* Encoder click: 3-button mode still starts/stops heating; in the
-		   normal layout it selects the graph / gauge view instead. */
-		if (flash_values.three_button_mode == 1){
-			buttons_toggle_heating();
-		}
-		else{
-			display_app_toggle_view();
-		}
+		/* Encoder click: reserved, currently does nothing. */
 	}
 
 	if(buttons_take_long_press(BTN_1)){
@@ -108,7 +100,7 @@ void buttons_handle(void){
 		settings_menu();
 	}
 
-	/* Preset 1: short press starts/stops the iron, long press saves preset 1 */
+	/* Preset 1: short press selects the graph / gauge view, long press saves it */
 	if(buttons_take_press(BTN_2)){
 		if(settings_menu_active == 1){
 			encoder_add(+2);
@@ -117,8 +109,8 @@ void buttons_handle(void){
 			encoder_add(+5);
 		}
 		else{
-			/* BTN_2 now starts/stops the iron (was the encoder click). */
-			buttons_toggle_heating();
+			/* BTN_2 selects the graph / gauge dashboard (as before). */
+			display_app_toggle_view();
 		}
 	}
 	if(buttons_take_long_press(BTN_2)){
@@ -133,7 +125,7 @@ void buttons_handle(void){
 		}
 	}
 
-	/* Set "set temp" to preset temp 2 */
+	/* Preset 2: short press starts/stops the iron, long press saves preset 2 */
 	if(buttons_take_press(BTN_3)){
 		if(settings_menu_active == 1){
 			encoder_add(-2);
@@ -142,7 +134,8 @@ void buttons_handle(void){
 				encoder_add(-5);
 			}
 		else{
-			encoder_set_count((uint16_t)flash_values.preset_temp_2);
+			/* BTN_3 starts/stops the iron. */
+			buttons_toggle_heating();
 		}
 	}
 	if(buttons_take_long_press(BTN_3)){

@@ -350,7 +350,7 @@ typedef struct {
 } alt_layout_t;
 
 static const alt_layout_t alt_portrait = {
-    .big_x = 51, .big_y = 30, .sel_y = 100,
+    .big_x = 60, .big_y = 37, .sel_y = 103,
     .div_x = 120, .div_y = 160,
     .info_x = 126, .info_value_x = 168, .info_y0 = 180, .info_pitch = 30,
     .cx = 60, .cy = 300, .r = 50,
@@ -359,7 +359,7 @@ static const alt_layout_t alt_portrait = {
 };
 
 static const alt_layout_t alt_landscape = {
-    .big_x = 91, .big_y = 15, .sel_y = 84,
+    .big_x = 100, .big_y = 17, .sel_y = 83,
     .div_x = 160, .div_y = 120,
     .info_x = 170, .info_value_x = 208, .info_y0 = 140, .info_pitch = 30,
     .cx = 80, .cy = 225, .r = 48,
@@ -461,7 +461,7 @@ static void alt_update_display(void)
             UG_FillFrame((uint16_t)(x - 2), (uint16_t)(alt.big_y - 2),
                          (uint16_t)(x + group_w), (uint16_t)(alt.big_y + 58), C_Background);
             if (detached) {
-                LCD_PutStr((uint16_t)x, alt.big_y, "---",
+                LCD_PutStr((uint16_t)(x + 19), alt.big_y, "---",
                            FONT_arial_40X54_NUMBERS, temp_color, C_Background);
             } else {
                 char text[8];
@@ -490,15 +490,16 @@ static void alt_update_display(void)
 
     /* Selected temperature, right-aligned under the big number. */
     if (!graph_readout_valid || (graph_readout.set_temp != set_temp)) {
-        const int group_w = 96;              /* "Sel. %3d " + degree + 'C' */
+        const int text_w = 93;               /* "Sel. %3d " in 20x23 */
+        const int group_w = text_w + 16;     /* + degree ring and 'C' */
         const int x = sw - 6 - group_w;
         char text[32];
 
         UG_FillFrame((uint16_t)x, (uint16_t)(alt.sel_y - 2),
-                     (uint16_t)(x + group_w), (uint16_t)(alt.sel_y + 16), C_Background);
+                     (uint16_t)(x + group_w), (uint16_t)(alt.sel_y + 20), C_Background);
         (void)snprintf(text, sizeof(text), "Sel. %3d ", set_temp);
-        LCD_PutStr((uint16_t)x, alt.sel_y, text, FONT_arial_17X18, C_JbcGray, C_Background);
-        readout_deg_c(x + 80, alt.sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
+        LCD_PutStr((uint16_t)x, alt.sel_y, text, FONT_arial_20X23, C_JbcGray, C_Background);
+        readout_deg_c(x + text_w, alt.sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
         graph_readout.set_temp = (int16_t)set_temp;
     }
 
