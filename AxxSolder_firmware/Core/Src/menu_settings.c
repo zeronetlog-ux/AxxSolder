@@ -55,6 +55,7 @@ enum {
     MI_DISP_TEMP_FILTER   = 302,
     MI_SHOW_POWER         = 303,
     MI_DISPLAY_GRAPH      = 304,
+    MI_GRAPH_TIMEBASE     = 305,
 
     /* ── Sound (400–499) ───────────────────────────────────────────── */
     MI_BUZZER_ENABLED     = 400,
@@ -128,6 +129,7 @@ static const MI_Entry mi_table[] = {
     { MI_DISP_TEMP_FILTER,   21,         "Disp Temp. filter"    },
     { MI_SHOW_POWER,         26,         "Show power"           },
     { MI_DISPLAY_GRAPH,      32,         "Display graph"        },
+    { MI_GRAPH_TIMEBASE,     41,         "Graph timebase"       },
     /* Sound */
     { MI_BUZZER_ENABLED,     5,          "Buzzer Enabled"       },
     { MI_STARTUP_BEEP,       12,         "Startup Beep"         },
@@ -204,7 +206,7 @@ static const uint16_t GRP_PRESETS[] = { MI_PRESET_TEMP_1, MI_PRESET_TEMP_2 };
 /* Display */
 static const uint16_t GRP_DISPLAY[] = {
     MI_SCREEN_ROTATION, MI_TEMP_UNIT, MI_DISP_TEMP_FILTER, MI_SHOW_POWER,
-    MI_DISPLAY_GRAPH
+    MI_GRAPH_TIMEBASE
 };
 
 /* Sound */
@@ -300,6 +302,7 @@ void left_align_float(char* str, float number, int8_t len)
 // ==== Enumeration strings ====
 const char* bool_str[] = { "No ", "Yes " };
 const char* screen_rotation_str[] = { "0°", "90°", "180°", "270°" };
+const char* graph_time_str[] = { "0.5 s", "1 s", "2 s", "5 s", "10 s" };
 const char* show_power_str[] = { "W", "%"};
 const char* temp_unit_str[] = { "°F", "°C"};
 const char* encoder_step_str[] = { "1", "2", "5", "10" };
@@ -315,6 +318,7 @@ EnumParam enum_params[] = {
     { MI_BUZZER_ENABLED,     bool_str, 2 },
     { MI_GPIO4_ON_AT_RUN,    bool_str, 2 },
     { MI_SCREEN_ROTATION,    screen_rotation_str, 4 },
+    { MI_GRAPH_TIMEBASE,     graph_time_str, 5 },
     { MI_MOMENTARY_STAND,    bool_str, 2 },
     { MI_I_MEASUREMENT,      bool_str, 2 },
     { MI_STARTUP_BEEP,       bool_str, 2 },
@@ -457,6 +461,11 @@ void normalize_param(uint16_t index) {
         // --- Screen rotation: 0..3
         case MI_SCREEN_ROTATION:
             *p = normalize_enum(*p, 4);
+            break;
+
+        // --- Graph time base: 0.5/1/2/5/10 s/div
+        case MI_GRAPH_TIMEBASE:
+            *p = normalize_enum(*p, 5);
             break;
 
         // --- Encoder step: index 0..3 -> {1,2,5,10}

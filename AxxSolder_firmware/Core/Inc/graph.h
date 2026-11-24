@@ -1,5 +1,6 @@
 #ifndef INC_DISPLAY_H_
 #define INC_DISPLAY_H_
+#include <stdint.h>
 #include "app_colors.h"   /* AxxSolder UI colour palette */
 
 /* Includes ------------------------------------------------------------------*/
@@ -14,6 +15,25 @@ extern uint16_t FIELD_W_SET_SMALL;
 extern uint16_t FIELD_W_ACT;
 
 extern uint8_t initialized;
+
+/* Active screen geometry of the graph view (portrait or landscape). */
+typedef struct {
+    uint16_t x0, y0, w, h;          /* plot/data area                    */
+    uint16_t rule_y, div_x;         /* readout pane separators           */
+    uint16_t big_x, big_y;          /* large tip temperature             */
+    uint16_t ring_x, ring_y;        /* degree ring                       */
+    uint16_t c_x, c_y;              /* 'C'/'F' letter                    */
+    uint16_t sel_y;                 /* "Sel. ..." line                   */
+    uint16_t info_x, info_value_x;
+    uint16_t info_y0, info_pitch;
+} graph_layout_t;
+
+extern graph_layout_t graph_layout;
+
+/* Graph time base: visible samples and the decimation factor, derived
+ * from flash_values.graph_timebase (0.5 / 1 / 2 / 5 / 10 s/div). */
+uint8_t graph_timebase_points(void);
+uint8_t graph_timebase_decim(void);
 
 #define background C_Background
 #define color_text C_Text

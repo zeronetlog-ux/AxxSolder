@@ -18,6 +18,10 @@
 #define C_GraphPower       0x3F00   /* power-% text + temp trace (SLEEP)  */
 #define C_GraphGrid        0x6AAD   /* dashed grid                        */
 #define C_GraphPowerSleep  0xFE03   /* power trace (SLEEP)                */
+#define C_JbcRed           0xE000   /* right axis + power trace (JBC UI)  */
+#define C_JbcGrid          0x8410   /* neutral grey grid                  */
+#define C_JbcGray          0xA514   /* secondary text (Sel. ...)          */
+#define C_TempActive       0x559A   /* active tip temperature: 85,176,215 */
 
 #endif /* __APP_COLORS_H */
 

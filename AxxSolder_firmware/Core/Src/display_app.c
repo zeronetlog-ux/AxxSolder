@@ -101,21 +101,6 @@ static void format_power_source(char *buf, size_t len)
     }
 }
 
-/* One-line variant for the graph view (space is tight above the plot):
- * "Handle:T245 Vin:19.8 PD 60W" in the small font. */
-static void draw_graph_info_line(uint16_t x, uint16_t y)
-{
-    char src[12];
-
-    format_power_source(src, sizeof(src));
-    (void)snprintf(DISPLAY_buffer, sizeof(DISPLAY_buffer), "Handle:%-4s Vin:%d.%d %s",
-                   handle_name_str(),
-                   (int)sensor_values.bus_voltage,
-                   (int)(sensor_values.bus_voltage * 10) % 10,
-                   src);
-    LCD_PutStr(x, y, DISPLAY_buffer, FONT_arial_12X15, C_Text, C_Background);
-}
-
 /* Draw "Handle:<name>" and "Vin:<volts> <source>" (source after the voltage,
  * with the negotiated power for USB-PD). Used by both screen orientations. */
 static void draw_info_lines(uint16_t x, uint16_t y_handle, uint16_t y_vin)
@@ -171,6 +156,186 @@ static void format_number_left(float input, char* buffer) {
 }
 
 /* Function to update the standby and sleep timer countdown */
+/* ------------------------------------------------------------------ */
+/* Graph view update                                                  */
+/* ------------------------------------------------------------------ */
+
+#if defined(LCD_240X320)
+
+typedef struct {
+    int16_t tip_temp;
+    int16_t set_temp;
+    uint8_t celsius;
+    uint8_t detached;
+    uint8_t temp_mode;
+    char    info[4][20];
+} graph_readout_cache_t;
+
+static graph_readout_cache_t graph_readout;
+static uint8_t graph_readout_valid = 0;
+
+void display_app_graph_invalidate(void)
+{
+    graph_readout_valid = 0;
+}
+
+/* Degree ring + unit letter (the 17x18/12x15 faces have no '°'). */
+static void readout_deg_c(int x, int y, int r, int dx, char letter,
+                          UG_FONT *f, uint16_t color)
+{
+    char b[2] = { letter, 0 };
+
+    UG_DrawCircle(x + r, y + r + 1, r, color);
+    LCD_PutStr((uint16_t)(x + dx), (uint16_t)y, b, f, color, C_Background);
+}
+
+/* Cartridge / supply / MCU pane (replaces JBC's Time/Energy table). */
+static void build_graph_info(char info[4][20])
+{
+    int power_w;
+
+    memset(info, 0, 4 * 20);
+    (void)snprintf(info[0], sizeof(info[0]), "%s", handle_name_str());
+    (void)snprintf(info[1], sizeof(info[1]), "%d.%dV",
+                   (int)sensor_values.bus_voltage,
+                   (int)(sensor_values.bus_voltage * 10) % 10);
+
+    /* What the source granted over USB-PD (or the supply budget on DC). */
+    power_w = (int)(sensor_values.USB_PD_contract_power + 0.5f);
+    if ((power_w <= 0) || (power_w >= 1000)) {
+        power_w = (int)(sensor_values.max_power_watt + 0.5f);
+    }
+    (void)snprintf(info[2], sizeof(info[2]), "%dW", power_w);
+}
+
+static void update_graph_display(void)
+{
+    const graph_layout_t *L = &graph_layout;
+    const char unit = (flash_values.deg_celsius == 1) ? 'C' : 'F';
+    char info[4][20];
+    uint8_t detached = (uint8_t)(cartridge_state == DETACHED);
+    uint8_t celsius  = (uint8_t)(flash_values.deg_celsius == 1);
+    /* 0 = RUN (white), 1 = standby (yellow), 2 = sleep/off (blue). */
+    uint8_t temp_mode;
+    uint16_t temp_color;
+
+    if (sensor_values.current_state == RUN) {
+        temp_mode = 0;
+        temp_color = C_Text;
+    } else if ((sensor_values.current_state == STANDBY) ||
+               (sensor_values.current_state == PRESTANDBY)) {
+        temp_mode = 1;
+        temp_color = C_Header;
+    } else {
+        temp_mode = 2;
+        temp_color = C_TempActive;
+    }
+    int set_temp = (int)convert_temperature(sensor_values.set_temperature);
+    int tip_temp = detached ? -1000
+                            : (int)convert_temperature(sensor_values.thermocouple_temperature_filtered);
+    char ub[2] = { unit, 0 };
+
+    build_graph_info(info);
+
+    /* Large actual tip temperature, centred in the left pane. Only the
+     * 3-character field is repainted on a value change, otherwise the big
+     * digits visibly flash. */
+    {
+        const int field_w = 99;               /* 3 chars in the numeric face */
+        const int group_w = field_w + 18;     /* field + degree ring + 'C'   */
+        int x = (L->div_x - group_w) / 2;
+        bool state_changed = !graph_readout_valid ||
+                             (graph_readout.detached != detached) ||
+                             (graph_readout.celsius != celsius) ||
+                             (graph_readout.temp_mode != temp_mode);
+
+        if (x < L->big_x) {
+            x = L->big_x;
+        }
+
+        if (state_changed) {
+            UG_FillFrame(L->big_x, L->big_y,
+                         (uint16_t)(L->div_x - 6), (uint16_t)(L->sel_y - 6), C_Background);
+
+            if (detached) {
+                int dx = (L->div_x - 60) / 2;
+
+                if (dx < L->big_x) {
+                    dx = L->big_x;
+                }
+                LCD_PutStr((uint16_t)dx, L->big_y, "---",
+                           FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+            } else {
+                char text[8];
+
+                format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), text);
+                LCD_PutStr((uint16_t)x, L->big_y, text,
+                           FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+                UG_DrawCircle(x + field_w + 5, L->big_y + 6, 2, temp_color);
+                UG_DrawCircle(x + field_w + 5, L->big_y + 6, 1, temp_color);
+                LCD_PutStr((uint16_t)(x + field_w + 9), (uint16_t)(L->big_y + 2), ub,
+                           FONT_arial_12X15, temp_color, C_Background);
+            }
+            graph_readout.tip_temp = (int16_t)tip_temp;
+            graph_readout.detached = detached;
+            graph_readout.celsius  = celsius;
+            graph_readout.temp_mode = temp_mode;
+        } else if (!detached && (graph_readout.tip_temp != tip_temp)) {
+            char text[8];
+
+            format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), text);
+            LCD_PutStr((uint16_t)x, L->big_y, text,
+                       FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+            graph_readout.tip_temp = (int16_t)tip_temp;
+        }
+    }
+
+    /* Selected temperature, centred under the big readout. */
+    if (!graph_readout_valid || (graph_readout.set_temp != set_temp)) {
+        char text[24];
+        const int group_w = 109;          /* "Sel. %3d " + degree + 'C' */
+        int x = (L->div_x - group_w) / 2;
+
+        if (x < L->big_x) {
+            x = L->big_x;
+        }
+        UG_FillFrame(L->big_x, (uint16_t)(L->sel_y - 2),
+                     (uint16_t)(L->div_x - 6), (uint16_t)(L->sel_y + 18), C_Background);
+        (void)snprintf(text, sizeof(text), "Sel. %3d ", set_temp);
+        LCD_PutStr((uint16_t)x, L->sel_y, text, FONT_arial_20X23, C_JbcGray, C_Background);
+        readout_deg_c(x + 93, L->sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
+
+        graph_readout.set_temp = (int16_t)set_temp;
+    }
+
+    /* Info pane values. */
+    if (!graph_readout_valid || (memcmp(graph_readout.info, info, sizeof(info)) != 0)) {
+        for (uint8_t i = 0; i < 3; i++) {
+            uint16_t y = (uint16_t)(L->info_y0 + (i * L->info_pitch));
+
+            if (!graph_readout_valid ||
+                (memcmp(graph_readout.info[i], info[i], sizeof(info[i])) != 0)) {
+                UG_FillFrame(L->info_value_x, y,
+                             (uint16_t)((((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 240 : 320) - 6),
+                             (uint16_t)(y + 18), C_Background);
+                LCD_PutStr(L->info_value_x, y, info[i],
+                           FONT_arial_20X23, C_Text, C_Background);
+            }
+        }
+        memcpy(graph_readout.info, info, sizeof(info));
+    }
+
+    graph_readout_valid = 1;
+}
+
+#else
+/* Other panel geometries keep the legacy text screen; nothing to cache. */
+void display_app_graph_invalidate(void)
+{
+}
+#endif /* LCD_240X320 */
+
+
 static void update_standby_sleep_display(void) {
     uint32_t now = HAL_GetTick();
     uint32_t countdown_ms = 0;
@@ -211,97 +376,6 @@ static void update_standby_sleep_display(void) {
     }
 	LCD_PutStr(11, 235, display_buffer, FONT_arial_17X18, C_Header, C_Background);
 }
-
-/* ------------------------------------------------------------------ */
-/* Graph view update                                                  */
-/* ------------------------------------------------------------------ */
-
-static void update_graph_display(void) {
-    if ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) {
-        memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-        format_number_left(convert_temperature(sensor_values.set_temperature), DISPLAY_buffer);
-        LCD_PutStr(140, 8, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
-
-        if (cartridge_state == DETACHED) {
-            LCD_PutStr(140, 33, " ---  ", FONT_arial_20X23, C_Text, C_Background);
-        } else {
-            memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-            format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), DISPLAY_buffer);
-            LCD_PutStr(140, 33, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
-        }
-
-        /* Handle + input voltage + power source (PD shows negotiated power). */
-        draw_graph_info_line(10, 58);
-
-        UG_DrawFrame(208, 7, 229, 72, C_Text);
-
-        if ((sensor_values.current_state == SLEEP || sensor_values.current_state == EMERGENCY_SLEEP || sensor_values.current_state == HALTED) && !sleep_state_written_to_LCD) {
-            UG_FillFrame(209, 8, 228, 71, C_Highlight);
-            LCD_PutStr(214, 13, "Z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(215, 32, "z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(214, 53, "Z", FONT_arial_17X18, C_Background, C_Highlight);
-            sleep_state_written_to_LCD = 1;
-            standby_state_written_to_LCD = 0;
-        }
-        else if ((sensor_values.current_state == STANDBY) && !standby_state_written_to_LCD) {
-            UG_FillFrame(209, 8, 228, 71, C_Highlight);
-            LCD_PutStr(213, 13, "S", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(213, 33, "T", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(213, 53, "B", FONT_arial_17X18, C_Background, C_Highlight);
-            standby_state_written_to_LCD = 1;
-            sleep_state_written_to_LCD = 0;
-        }
-        else if (sensor_values.current_state == RUN) {
-            UG_FillFrame(209, 8, 228, 71, C_PowerBar);
-            standby_state_written_to_LCD = 0;
-            sleep_state_written_to_LCD = 0;
-        }
-    }
-    else {
-        memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-        format_number_left(convert_temperature(sensor_values.set_temperature), DISPLAY_buffer);
-        LCD_PutStr(140, 8, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
-
-        if (cartridge_state == DETACHED) {
-            LCD_PutStr(140, 33, " ---  ", FONT_arial_20X23, C_Text, C_Background);
-        } else {
-            memset(&DISPLAY_buffer, '\0', sizeof(DISPLAY_buffer));
-            format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), DISPLAY_buffer);
-            LCD_PutStr(140, 33, DISPLAY_buffer, FONT_arial_20X23, C_Text, C_Background);
-        }
-
-        /* Handle + input voltage + power source (PD shows negotiated power). */
-        draw_graph_info_line(10, 58);
-
-        UG_DrawFrame(288, 7, 310, 72, C_Text);
-
-        if ((sensor_values.current_state == SLEEP || sensor_values.current_state == EMERGENCY_SLEEP || sensor_values.current_state == HALTED) && !sleep_state_written_to_LCD) {
-            UG_FillFrame(290, 8, 309, 71, C_Highlight);
-            LCD_PutStr(294, 13, "Z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(295, 32, "z", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(294, 53, "Z", FONT_arial_17X18, C_Background, C_Highlight);
-            sleep_state_written_to_LCD = 1;
-            standby_state_written_to_LCD = 0;
-        }
-        else if ((sensor_values.current_state == STANDBY) && !standby_state_written_to_LCD) {
-            UG_FillFrame(290, 8, 309, 71, C_Highlight);
-            LCD_PutStr(294, 13, "S", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(294, 33, "T", FONT_arial_17X18, C_Background, C_Highlight);
-            LCD_PutStr(294, 53, "B", FONT_arial_17X18, C_Background, C_Highlight);
-            standby_state_written_to_LCD = 1;
-            sleep_state_written_to_LCD = 0;
-        }
-        else if (sensor_values.current_state == RUN) {
-            UG_FillFrame(290, 8, 309, 71, C_PowerBar);
-            standby_state_written_to_LCD = 0;
-            sleep_state_written_to_LCD = 0;
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* Main-screen update                                                 */
-/* ------------------------------------------------------------------ */
 
 static void update_display(void) {
     if (flash_values.screen_rotation == 0) {
@@ -455,10 +529,10 @@ static void update_display(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Main-screen layout (drawn on boot and after popup dismisses)       */
+/* Main-screen layout (landscape fallback of the old text screen)     */
 /* ------------------------------------------------------------------ */
 
-void LCD_draw_main_screen(void) {
+static void LCD_draw_main_screen(void) {
     if ((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) {
         UG_FillScreen(C_Background);
         /* Opaque text: the partial updates below rely on it to wipe the
@@ -590,6 +664,28 @@ void LCD_draw_main_screen(void) {
 
     /* Callers (buttons.c preset-save, show_popup) clear
      * sleep_state_written_to_LCD as needed to trigger overlay redraw. */
+}
+
+/* The JBC-style graph screen is the station's main screen in portrait;
+ * the old text screen survives only as the landscape fallback. */
+static bool display_app_uses_graph_screen(void)
+{
+#if defined(LCD_240X320)
+    return true;                 /* the JBC screen is the station's main UI */
+#else
+    return false;
+#endif
+}
+
+/* Draw the static layout of the active screen (boot, popup dismissed,
+ * settings/preset change). */
+void display_app_draw_screen(void)
+{
+    if (display_app_uses_graph_screen()) {
+        draw_graph_init();
+    } else {
+        LCD_draw_main_screen();
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -883,13 +979,8 @@ void display_app_tick(void){
 		if(HAL_GetTick() - previous_millis_popup >= POPUP_DWELL_MS){
 			popup_shown = 0;
 
-			if (flash_values.display_graph == 0){
-				LCD_draw_main_screen(); // Clear the area where the emergency message is displayed
-			}
-			else{
-				UG_FillScreen(background);
-				draw_graph_init();
-			}
+			/* Clear the area where the emergency message was displayed. */
+			display_app_draw_screen();
 		}
 	}
 	else{
@@ -897,15 +988,36 @@ void display_app_tick(void){
 		if(HAL_GetTick() - previous_millis_display >= DISPLAY_TICK_INTERVAL_MS){
 			sensor_values.requested_power_filtered = clamp(Moving_Average_Compute(sensor_values.requested_power, &requested_power_filtered_filter_struct), 0.0f, PID_MAX_OUTPUT);
 
-			if (flash_values.display_graph == 0){
-				update_display();
-			}
-			else{
-				float graf_percent = sensor_values.requested_power_filtered / (PID_MAX_OUTPUT/100);
+#if defined(LCD_240X320)
+			if (display_app_uses_graph_screen()){
+				static uint8_t graph_decim = 0;
 
-				add_data_point((uint16_t) convert_temperature(sensor_values.thermocouple_temperature_filtered), (uint16_t) graf_percent, (uint16_t) sensor_values.set_temperature);
+				if (++graph_decim >= graph_timebase_decim()) {
+					/* Store the actual heater power in 0.1 W (the graph axis is
+					 * in watts): requested PID output scaled by the budget. */
+					float max_w = sensor_values.max_power_watt;
+					float graf_power;
+
+					if (max_w < 1.0f) {
+						max_w = 1.0f;
+					}
+					graf_power = sensor_values.requested_power * (max_w * 10.0f / PID_MAX_OUTPUT);
+
+					if (graf_power > max_w * 10.0f) {
+						graf_power = max_w * 10.0f;
+					}
+					graph_decim = 0;
+					add_data_point((uint16_t) convert_temperature(sensor_values.thermocouple_temperature_filtered),
+					               (uint16_t) graf_power,
+					               (uint16_t) sensor_values.set_temperature);
+				}
 				draw_graph_update();
 				update_graph_display();
+			}
+			else
+#endif
+			{
+				update_display();
 			}
 
 			previous_millis_display = HAL_GetTick();

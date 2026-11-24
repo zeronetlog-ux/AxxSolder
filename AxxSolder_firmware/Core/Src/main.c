@@ -443,13 +443,8 @@ int main(void)
 #endif
 	}
 
-	/* Draw the main screen decoration */
-	if (flash_values.display_graph == 0){
-		LCD_draw_main_screen();
-	}
-	else{
-		draw_graph_init();
-	}
+	/* Draw the station screen (portrait: JBC-style graph, landscape: legacy) */
+	display_app_draw_screen();
 	HAL_Delay(250);
 
 	/* Set beep tone */

@@ -115,13 +115,8 @@ void buttons_handle(void){
 			if(flash_values.three_button_mode == 0){
 				flash_values.preset_temp_1 = encoder_get_count();
 				settings_save();
-				/* Draw the main screen decoration */
-				if (flash_values.display_graph == 0){
-					LCD_draw_main_screen();
-				}
-				else{
-					draw_graph_init();
-				}
+				/* Redraw the station screen (the set temp readout lives there). */
+				display_app_draw_screen();
 				sleep_state_written_to_LCD = 0;
 			}
 		}
@@ -144,13 +139,8 @@ void buttons_handle(void){
 			if(flash_values.three_button_mode == 0){
 				flash_values.preset_temp_2 = encoder_get_count();
 				settings_save();
-				/* Draw the main screen decoration */
-				if (flash_values.display_graph == 0){
-					LCD_draw_main_screen();
-				}
-				else{
-					draw_graph_init();
-				}
+				/* Redraw the station screen (the set temp readout lives there). */
+				display_app_draw_screen();
 				sleep_state_written_to_LCD = 0;
 			}
 		}

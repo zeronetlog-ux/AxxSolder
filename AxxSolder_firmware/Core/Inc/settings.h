@@ -57,6 +57,8 @@ typedef struct {
                                * the most powerful mode the source advertises;
                                * holding the encoder at power-up shows the
                                * chooser anyway for that boot */
+    float graph_timebase;     /* Graph time base: index into
+                               * {0.5, 1, 2, 5, 10} seconds per division */
 } Flash_values;
 
 /* The single live copy of user settings. Read directly from anywhere

@@ -34,9 +34,11 @@ extern uint8_t standby_state_written_to_LCD;
  * Self-gated; safe to call every loop iteration. */
 void display_app_tick(void);
 
-/* Draw the static main-screen layout (labels, frames, preset readouts).
- * Called on boot, after a popup dismisses, and after a settings save. */
-void LCD_draw_main_screen(void);
+/* Draw the static layout of the active screen (boot, popup dismiss,
+ * preset/settings change):
+ *   - portrait: the JBC-style graph screen (the station's main screen)
+ *   - landscape: the legacy text screen */
+void display_app_draw_screen(void);
 
 /* Show a transient orange popup with the given text. Auto-dismisses
  * after the popup interval. */
@@ -71,6 +73,11 @@ void LCD_show_nvm_dump(const uint8_t *nvm);
  * movement or button press restarts the countdown; only a button press changes
  * the selected mode. */
 #define PD_BANNER_TIMEOUT_MS 20000
+
+/* Drop the cached values of the portrait graph screen. graph.c calls this
+ * after a full redraw (draw_graph_init) so the next tick repaints the big
+ * temperature readout, the power badge and the information pane. */
+void display_app_graph_invalidate(void);
 
 /* Convert a Celsius temperature to the user's preferred unit
  * (deg C or deg F per flash_values.deg_celsius). */
