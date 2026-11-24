@@ -45,6 +45,8 @@ enum {
     /* ── Presets (100–199) ─────────────────────────────────────────── */
     MI_PRESET_TEMP_1      = 100,
     MI_PRESET_TEMP_2      = 101,
+    MI_PRESET_TEMP_3      = 102,
+    MI_PRESET_TEMP_4      = 103,
 
     /* ── Profiles (200–299) ────────────────────────────────────────── */
     MI_PROFILE_ON_TIP_CHG = 200,
@@ -123,6 +125,8 @@ static const MI_Entry mi_table[] = {
     /* Presets */
     { MI_PRESET_TEMP_1,      6,          "Preset Temp 1 °C"     },
     { MI_PRESET_TEMP_2,      7,          "Preset Temp 2 °C"     },
+    { MI_PRESET_TEMP_3,      42,         "Preset Temp 3 °C"     },
+    { MI_PRESET_TEMP_4,      43,         "Preset Temp 4 °C"     },
     /* Display */
     { MI_SCREEN_ROTATION,    9,          "Screen Rotation"      },
     { MI_TEMP_UNIT,          13,         "Temperature unit"     },
@@ -201,7 +205,8 @@ static const uint16_t GRP_MODE[] = {
 };
 
 /* Presets */
-static const uint16_t GRP_PRESETS[] = { MI_PRESET_TEMP_1, MI_PRESET_TEMP_2 };
+static const uint16_t GRP_PRESETS[] = { MI_PRESET_TEMP_1, MI_PRESET_TEMP_2,
+                                        MI_PRESET_TEMP_3, MI_PRESET_TEMP_4 };
 
 /* Display */
 static const uint16_t GRP_DISPLAY[] = {
@@ -486,6 +491,7 @@ void normalize_param(uint16_t index) {
         // --- Temperature parameters: 0..MAX_SELECTABLE_TEMPERATURE
         case MI_STARTUP_TEMP: case MI_STANDBY_TEMP:
         case MI_PRESET_TEMP_1: case MI_PRESET_TEMP_2:
+        case MI_PRESET_TEMP_3: case MI_PRESET_TEMP_4:
             *p = fmodf(roundf(fmodf(fabsf(*p), MAX_SELECTABLE_TEMPERATURE + 1)), MAX_SELECTABLE_TEMPERATURE + 1);
             break;
 
@@ -512,6 +518,7 @@ void settings_menu()
     LCD_SetRotation(flash_values.screen_rotation);
     UG_FillScreen(C_Background);
     UG_FontSetTransparency(1);
+    const uint16_t sw = (uint16_t)UG_GetXDim();
 
     // --- Firmware version string ---
     char str[64] = {0};
@@ -578,7 +585,7 @@ void settings_menu()
 
         // ---- Full page redraw ----
         if (redraw_page || (new_page_start != page_start)) {
-            UG_FillFrame(0, 0, 239, 31 + menu_lines_on_screen * 26, C_Background);
+            UG_FillFrame(0, 0, (uint16_t)(sw - 1), 31 + menu_lines_on_screen * 26, C_Background);
             page_start = new_page_start;
 
             // Redraw header
@@ -587,9 +594,9 @@ void settings_menu()
             } else {
                 LCD_PutStr(5, 5, MENU_GROUPS[current_group].title, FONT_arial_20X23, C_Footer, C_Background);
             }
-            LCD_DrawLine(0, 25, 240, 25, C_Footer);
-            LCD_DrawLine(0, 26, 240, 26, C_Footer);
-            LCD_DrawLine(0, 27, 240, 27, C_Footer);
+            LCD_DrawLine(0, 25, (uint16_t)(sw - 1), 25, C_Footer);
+            LCD_DrawLine(0, 26, (uint16_t)(sw - 1), 26, C_Footer);
+            LCD_DrawLine(0, 27, (uint16_t)(sw - 1), 27, C_Footer);
 
             // Reset value row cache - important so display_menu_value_line() redraws
             for (int i = 0; i < menu_lines_on_screen; i++) {
@@ -647,15 +654,15 @@ void settings_menu()
                 (prev_cursor / menu_lines_on_screen) == (cursor / menu_lines_on_screen)) {
                 uint8_t prev_line = prev_cursor % menu_lines_on_screen;
                 uint16_t prev_y = 35 + prev_line * 26;
-                UG_DrawFrame(0, prev_y - 4, 239, prev_y + 4 + MENU_VALUE_H, C_Background);
-                UG_DrawFrame(1, prev_y - 3, 238, prev_y + 3 + MENU_VALUE_H, C_Background);
+                UG_DrawFrame(0, prev_y - 4, (uint16_t)(sw - 1), prev_y + 4 + MENU_VALUE_H, C_Background);
+                UG_DrawFrame(1, prev_y - 3, (uint16_t)(sw - 2), prev_y + 3 + MENU_VALUE_H, C_Background);
             }
 
             // Draw the new frame
             uint8_t line = cursor % menu_lines_on_screen;
             uint16_t line_y = 35 + line * 26;
-            UG_DrawFrame(0, line_y - 4, 239, line_y + 4 + MENU_VALUE_H, C_Header);
-            UG_DrawFrame(1, line_y - 3, 238, line_y + 3 + MENU_VALUE_H, C_Header);
+            UG_DrawFrame(0, line_y - 4, (uint16_t)(sw - 1), line_y + 4 + MENU_VALUE_H, C_Header);
+            UG_DrawFrame(1, line_y - 3, (uint16_t)(sw - 2), line_y + 3 + MENU_VALUE_H, C_Header);
 
             prev_cursor = cursor;
         }

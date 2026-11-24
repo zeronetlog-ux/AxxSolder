@@ -345,7 +345,7 @@ static const alt_layout_t alt_portrait = {
     .info_x = 122, .info_value_x = 172, .info_y0 = 180, .info_pitch = 30,
     .cx = 60, .cy = 292, .r = 46,
     .title_x = 4, .title_y = 165, .value_y = 195,
-    .s25_x = 2, .s25_y = 294, .s75_x = 78, .s75_y = 294,
+    .s25_x = 2, .s25_y = 296, .s75_x = 78, .s75_y = 296,
 };
 
 static const alt_layout_t alt_landscape = {
@@ -354,7 +354,7 @@ static const alt_layout_t alt_landscape = {
     .info_x = 166, .info_value_x = 214, .info_y0 = 140, .info_pitch = 30,
     .cx = 80, .cy = 225, .r = 48,
     .title_x = 4, .title_y = 125, .value_y = 148,
-    .s25_x = 2, .s25_y = 190, .s75_x = 118, .s75_y = 190,
+    .s25_x = 2, .s25_y = 176, .s75_x = 118, .s75_y = 176,
 };
 
 static alt_layout_t alt;

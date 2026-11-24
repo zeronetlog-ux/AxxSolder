@@ -93,13 +93,19 @@ static void buttons_toggle_heating(void){
 
 void buttons_handle(void){
 	if(buttons_take_press(BTN_1)){
-		/* Encoder click: set-temperature banner / preset picker. */
-		display_banner_encoder_click();
+		/* Encoder click: set-temperature banner / preset picker. Not while
+		   the settings menu is running - there the encoder is the menu's. */
+		if(settings_menu_active == 0){
+			display_banner_encoder_click();
+		}
 	}
 
 	if(buttons_take_long_press(BTN_1)){
-		/* start settings menu */
-		settings_menu();
+		/* start settings menu (not from inside it - buttons_handle() is also
+		   called by the menu loop itself) */
+		if(settings_menu_active == 0){
+			settings_menu();
+		}
 	}
 
 	/* Preset 1: short press selects the graph / gauge view, long press saves it */
