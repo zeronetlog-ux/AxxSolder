@@ -189,11 +189,21 @@ static void readout_deg_c(int x, int y, int r, int dx, char letter,
     LCD_PutStr((uint16_t)(x + dx), (uint16_t)y, b, f, color, C_Background);
 }
 
+/* Supply power budget: the USB-PD contract when present, otherwise the
+ * configured DC budget. Used by the Pwr readout and the gauge scale. */
+static int supply_power_w(void)
+{
+    int power_w = (int)(sensor_values.USB_PD_contract_power + 0.5f);
+
+    if ((power_w <= 0) || (power_w >= 1000)) {
+        power_w = (int)(sensor_values.max_power_watt + 0.5f);
+    }
+    return power_w;
+}
+
 /* Cartridge / supply / MCU pane (replaces JBC's Time/Energy table). */
 static void build_graph_info(char info[4][20])
 {
-    int power_w;
-
     memset(info, 0, 4 * 20);
     (void)snprintf(info[0], sizeof(info[0]), "%s", handle_name_str());
     (void)snprintf(info[1], sizeof(info[1]), "%d.%dV",
@@ -201,11 +211,7 @@ static void build_graph_info(char info[4][20])
                    (int)(sensor_values.bus_voltage * 10) % 10);
 
     /* What the source granted over USB-PD (or the supply budget on DC). */
-    power_w = (int)(sensor_values.USB_PD_contract_power + 0.5f);
-    if ((power_w <= 0) || (power_w >= 1000)) {
-        power_w = (int)(sensor_values.max_power_watt + 0.5f);
-    }
-    (void)snprintf(info[2], sizeof(info[2]), "%dW", power_w);
+    (void)snprintf(info[2], sizeof(info[2]), "%dW", supply_power_w());
 }
 
 static void update_graph_display(void)
@@ -344,16 +350,16 @@ typedef struct {
 } alt_layout_t;
 
 static const alt_layout_t alt_portrait = {
-    .big_x = 61, .big_y = 25, .sel_y = 85,
+    .big_x = 51, .big_y = 30, .sel_y = 100,
     .div_x = 120, .div_y = 160,
     .info_x = 126, .info_value_x = 168, .info_y0 = 180, .info_pitch = 30,
     .cx = 60, .cy = 300, .r = 50,
     .title_x = 4, .title_y = 165, .value_y = 195,
-    .s25_x = 2, .s25_y = 302, .s75_x = 87, .s75_y = 302,
+    .s25_x = 2, .s25_y = 304, .s75_x = 87, .s75_y = 304,
 };
 
 static const alt_layout_t alt_landscape = {
-    .big_x = 101, .big_y = 20, .sel_y = 75,
+    .big_x = 91, .big_y = 15, .sel_y = 84,
     .div_x = 160, .div_y = 120,
     .info_x = 170, .info_value_x = 208, .info_y0 = 140, .info_pitch = 30,
     .cx = 80, .cy = 225, .r = 48,
@@ -362,9 +368,11 @@ static const alt_layout_t alt_landscape = {
 };
 
 static alt_layout_t alt;
-static uint8_t gauge_pct = 0xFF;
+static int gauge_max_w = 0;
+static int gauge_needle_w = -1;
 
-static void alt_draw_gauge(uint8_t pct);
+static void alt_draw_gauge_static(int max_w);
+static void alt_draw_needle(int watt);
 
 static void alt_select_layout(void)
 {
@@ -406,7 +414,8 @@ static void alt_draw_static(void)
     }
 
     display_app_graph_invalidate();
-    gauge_pct = 0xFF;
+    gauge_max_w = 0;
+    gauge_needle_w = -1;
 }
 
 static void alt_update_display(void)
@@ -440,7 +449,7 @@ static void alt_update_display(void)
 
     /* Large actual tip temperature, centred in the upper half. */
     {
-        const int field_w = 99;
+        const int field_w = 120;
         const int group_w = field_w + 18;
         const int x = alt.big_x;
         bool state_changed = !graph_readout_valid ||
@@ -450,19 +459,19 @@ static void alt_update_display(void)
 
         if (state_changed) {
             UG_FillFrame((uint16_t)(x - 2), (uint16_t)(alt.big_y - 2),
-                         (uint16_t)(x + group_w), (uint16_t)(alt.big_y + 50), C_Background);
+                         (uint16_t)(x + group_w), (uint16_t)(alt.big_y + 58), C_Background);
             if (detached) {
-                LCD_PutStr((uint16_t)(x + 20), alt.big_y, "---",
-                           FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+                LCD_PutStr((uint16_t)x, alt.big_y, "---",
+                           FONT_arial_40X54_NUMBERS, temp_color, C_Background);
             } else {
                 char text[8];
 
                 format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), text);
                 LCD_PutStr((uint16_t)x, alt.big_y, text,
-                           FONT_arial_36X44_NUMBERS, temp_color, C_Background);
-                UG_DrawCircle(x + field_w + 5, alt.big_y + 6, 2, temp_color);
-                UG_DrawCircle(x + field_w + 5, alt.big_y + 6, 1, temp_color);
-                LCD_PutStr((uint16_t)(x + field_w + 9), (uint16_t)(alt.big_y + 2), ub,
+                           FONT_arial_40X54_NUMBERS, temp_color, C_Background);
+                UG_DrawCircle(x + field_w + 5, alt.big_y + 8, 2, temp_color);
+                UG_DrawCircle(x + field_w + 5, alt.big_y + 8, 1, temp_color);
+                LCD_PutStr((uint16_t)(x + field_w + 9), (uint16_t)(alt.big_y + 3), ub,
                            FONT_arial_12X15, temp_color, C_Background);
             }
             graph_readout.tip_temp = (int16_t)tip_temp;
@@ -474,22 +483,22 @@ static void alt_update_display(void)
 
             format_number_left(convert_temperature(sensor_values.thermocouple_temperature_filtered), text);
             LCD_PutStr((uint16_t)x, alt.big_y, text,
-                       FONT_arial_36X44_NUMBERS, temp_color, C_Background);
+                       FONT_arial_40X54_NUMBERS, temp_color, C_Background);
             graph_readout.tip_temp = (int16_t)tip_temp;
         }
     }
 
-    /* Selected temperature, centred under the big number. */
+    /* Selected temperature, right-aligned under the big number. */
     if (!graph_readout_valid || (graph_readout.set_temp != set_temp)) {
-        const int group_w = 151;
-        const int x = (sw - group_w) / 2;
+        const int group_w = 96;              /* "Sel. %3d " + degree + 'C' */
+        const int x = sw - 6 - group_w;
         char text[32];
 
         UG_FillFrame((uint16_t)x, (uint16_t)(alt.sel_y - 2),
-                     (uint16_t)(x + group_w), (uint16_t)(alt.sel_y + 18), C_Background);
-        (void)snprintf(text, sizeof(text), "Sel. temp. %3d ", set_temp);
+                     (uint16_t)(x + group_w), (uint16_t)(alt.sel_y + 16), C_Background);
+        (void)snprintf(text, sizeof(text), "Sel. %3d ", set_temp);
         LCD_PutStr((uint16_t)x, alt.sel_y, text, FONT_arial_17X18, C_JbcGray, C_Background);
-        readout_deg_c(x + 135, alt.sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
+        readout_deg_c(x + 80, alt.sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
         graph_readout.set_temp = (int16_t)set_temp;
     }
 
@@ -508,14 +517,30 @@ static void alt_update_display(void)
         memcpy(graph_readout.info, info, sizeof(info));
     }
 
-    /* Power gauge. */
+    /* Power gauge: scale in watts from the supply budget. */
     {
-        uint8_t pct = (uint8_t)clamp(sensor_values.requested_power_filtered * 100.0f / PID_MAX_OUTPUT,
-                                     0.0f, 100.0f);
+        int max_w = supply_power_w();
+        int current_w;
 
-        if (!graph_readout_valid || (pct != gauge_pct)) {
-            alt_draw_gauge(pct);
-            gauge_pct = pct;
+        if (max_w < 1) {
+            max_w = 1;
+        }
+        if (max_w > 999) {
+            max_w = 999;
+        }
+        current_w = (int)(sensor_values.requested_power_filtered * (float)max_w / PID_MAX_OUTPUT + 0.5f);
+        if (current_w < 0) {
+            current_w = 0;
+        }
+        if (current_w > max_w) {
+            current_w = max_w;
+        }
+
+        if (!graph_readout_valid || (max_w != gauge_max_w)) {
+            alt_draw_gauge_static(max_w);
+        }
+        if (current_w != gauge_needle_w) {
+            alt_draw_needle(current_w);
         }
     }
 
@@ -543,14 +568,23 @@ static int16_t gauge_cos(int deg)
     return (deg <= 90) ? (int16_t)gauge_sin_tab[90 - deg] : -(int16_t)gauge_sin_tab[deg - 90];
 }
 
-static void alt_draw_gauge(uint8_t pct)
+static void alt_needle_endpoint(int deg, int *x2, int *y2)
+{
+    *x2 = (int)alt.cx + (((int)alt.r - 14) * gauge_cos(deg)) / 255;
+    *y2 = (int)alt.cy - (((int)alt.r - 14) * gauge_sin(deg)) / 255;
+}
+
+/* Static gauge: title, 25/50/75 % scale values in watts, arc and ticks. */
+static void alt_draw_gauge_static(int max_w)
 {
     const uint16_t sh = alt_screen_height();
-    const uint8_t side_w = 31;
-    const uint8_t side_h = 14;
     char b[8];
-    int x;
+    int v;
     int w;
+    int x;
+
+    gauge_max_w = max_w;
+    gauge_needle_w = -1;
 
     /* Clear the left half of the bottom pane. */
     UG_FillFrame(0, (uint16_t)(alt.div_y + 1), (uint16_t)(alt.div_x - 1),
@@ -558,10 +592,24 @@ static void alt_draw_gauge(uint8_t pct)
 
     LCD_PutStr(alt.title_x, alt.title_y, "Power", FONT_arial_17X18, C_Text, C_Background);
 
-    (void)snprintf(b, sizeof(b), "%u%%", (unsigned)pct);
-    w = (pct >= 100) ? 60 : ((pct >= 10) ? 45 : 28);
+    /* Mid-scale value (the three numbers are the scale, not the reading). */
+    v = (max_w * 50 + 50) / 100;
+    (void)snprintf(b, sizeof(b), "%dW", v);
+    w = (v >= 100) ? 60 : ((v >= 10) ? 45 : 28);
     x = (int)alt.cx - (w / 2);
     LCD_PutStr((uint16_t)x, alt.value_y, b, FONT_arial_20X23, C_Text, C_Background);
+
+    v = (max_w * 25 + 50) / 100;
+    (void)snprintf(b, sizeof(b), "%dW", v);
+    UG_FillFrame((uint16_t)(alt.s25_x - 1), (uint16_t)(alt.s25_y - 1),
+                 (uint16_t)(alt.s25_x + 32), (uint16_t)(alt.s25_y + 14), C_Background);
+    LCD_PutStr(alt.s25_x, alt.s25_y, b, FONT_arial_12X15, C_Text, C_Background);
+
+    v = (max_w * 75 + 50) / 100;
+    (void)snprintf(b, sizeof(b), "%dW", v);
+    UG_FillFrame((uint16_t)(alt.s75_x - 1), (uint16_t)(alt.s75_y - 1),
+                 (uint16_t)(alt.s75_x + 32), (uint16_t)(alt.s75_y + 14), C_Background);
+    LCD_PutStr(alt.s75_x, alt.s75_y, b, FONT_arial_12X15, C_Text, C_Background);
 
     for (int deg = 0; deg <= 180; deg++) {
         int px = (int)alt.cx + ((int)alt.r * gauge_cos(deg)) / 255;
@@ -581,25 +629,90 @@ static void alt_draw_gauge(uint8_t pct)
 
         draw_line_with_thickness(x1, y1, x2, y2, C_Text, 1);
     }
+}
 
-    /* Labels sit on top of the arc; clear a small patch behind them. */
-    UG_FillFrame((uint16_t)(alt.s25_x - 1), (uint16_t)(alt.s25_y - 1),
-                 (uint16_t)(alt.s25_x + side_w + 1), (uint16_t)(alt.s25_y + side_h), C_Background);
-    LCD_PutStr(alt.s25_x, alt.s25_y, "25%", FONT_arial_12X15, C_Text, C_Background);
-    UG_FillFrame((uint16_t)(alt.s75_x - 1), (uint16_t)(alt.s75_y - 1),
-                 (uint16_t)(alt.s75_x + side_w + 1), (uint16_t)(alt.s75_y + side_h), C_Background);
-    LCD_PutStr(alt.s75_x, alt.s75_y, "75%", FONT_arial_12X15, C_Text, C_Background);
+/* Move the needle without repainting the gauge: erase the old hand, put the
+ * arc/ticks it covered back, then draw the new hand. */
+static void alt_draw_needle(int watt)
+{
+    const uint16_t sh = alt_screen_height();
+    int new_deg;
+    int nx;
+    int ny;
 
-    {
-        int deg = 180 - ((int)pct * 180) / 100;
-        int nx = (int)alt.cx + (((int)alt.r - 14) * gauge_cos(deg)) / 255;
-        int ny = (int)alt.cy - (((int)alt.r - 14) * gauge_sin(deg)) / 255;
-
-        draw_line_with_thickness((int)alt.cx, (int)alt.cy, nx, ny, C_Text, 3);
-        UG_DrawCircle(alt.cx, alt.cy, 5, C_TempActive);
-        UG_DrawCircle(alt.cx, alt.cy, 4, C_TempActive);
-        UG_DrawCircle(alt.cx, alt.cy, 3, C_TempActive);
+    if (gauge_max_w < 1) {
+        return;
     }
+    if (watt < 0) {
+        watt = 0;
+    }
+    if (watt > gauge_max_w) {
+        watt = gauge_max_w;
+    }
+    new_deg = 180 - (watt * 180) / gauge_max_w;
+    alt_needle_endpoint(new_deg, &nx, &ny);
+
+    if (gauge_needle_w >= 0) {
+        int ow = gauge_needle_w;
+        int ox;
+        int oy;
+        int b0x;
+        int b0y;
+        int b1x;
+        int b1y;
+
+        if (ow > gauge_max_w) {
+            ow = gauge_max_w;
+        }
+        alt_needle_endpoint(180 - (ow * 180) / gauge_max_w, &ox, &oy);
+
+        b0x = b1x = (int)alt.cx;
+        b0y = b1y = (int)alt.cy;
+        if (ox < b0x) b0x = ox; else if (ox > b1x) b1x = ox;
+        if (oy < b0y) b0y = oy; else if (oy > b1y) b1y = oy;
+        if (nx < b0x) b0x = nx; else if (nx > b1x) b1x = nx;
+        if (ny < b0y) b0y = ny; else if (ny > b1y) b1y = ny;
+        b0x -= 3; b0y -= 3; b1x += 3; b1y += 3;
+        if (b0x < 0) b0x = 0;
+        if (b0y < (int)alt.div_y + 1) b0y = (int)alt.div_y + 1;
+        if (b1x > (int)alt.div_x - 1) b1x = (int)alt.div_x - 1;
+        if (b1y > (int)sh - 1) b1y = (int)sh - 1;
+
+        UG_FillFrame((uint16_t)b0x, (uint16_t)b0y, (uint16_t)b1x, (uint16_t)b1y, C_Background);
+
+        for (int deg = 0; deg <= 180; deg++) {
+            int ax = (int)alt.cx + ((int)alt.r * gauge_cos(deg)) / 255;
+            int ay = (int)alt.cy - ((int)alt.r * gauge_sin(deg)) / 255;
+
+            if ((ax >= b0x) && (ax <= b1x) && (ay >= b0y) && (ay <= b1y)) {
+                UG_DrawPixel((int16_t)ax, (int16_t)ay, C_Text);
+            }
+        }
+
+        for (int i = 0; i <= 10; i++) {
+            int deg = i * 18;
+            int c = gauge_cos(deg);
+            int s = gauge_sin(deg);
+            int x1 = (int)alt.cx + (((int)alt.r - 8) * c) / 255;
+            int y1 = (int)alt.cy - (((int)alt.r - 8) * s) / 255;
+            int x2 = (int)alt.cx + ((int)alt.r * c) / 255;
+            int y2 = (int)alt.cy - ((int)alt.r * s) / 255;
+            int lx = (x1 < x2) ? x1 : x2;
+            int hx = (x1 < x2) ? x2 : x1;
+            int ly = (y1 < y2) ? y1 : y2;
+            int hy = (y1 < y2) ? y2 : y1;
+
+            if ((hx >= b0x) && (lx <= b1x) && (hy >= b0y) && (ly <= b1y)) {
+                draw_line_with_thickness(x1, y1, x2, y2, C_Text, 1);
+            }
+        }
+    }
+
+    draw_line_with_thickness((int)alt.cx, (int)alt.cy, nx, ny, C_Text, 3);
+    UG_DrawCircle(alt.cx, alt.cy, 5, C_TempActive);
+    UG_DrawCircle(alt.cx, alt.cy, 4, C_TempActive);
+    UG_DrawCircle(alt.cx, alt.cy, 3, C_TempActive);
+    gauge_needle_w = watt;
 }
 
 void display_app_toggle_view(void)

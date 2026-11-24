@@ -74,23 +74,33 @@ void buttons_clear_all(void) {
 /* Main-loop handler                                                  */
 /* ------------------------------------------------------------------ */
 
-/* Function to toggle between RUN and HALTED at each press of the encoder button */
+/* Start/stop heating. Was the encoder click; now BTN_2 in the two-button
+ * layout (the encoder click selects the dashboard view). */
+static void buttons_toggle_heating(void){
+	if (sensor_values.current_state == RUN){
+		change_state(HALTED);
+	}
+	else{
+		change_state(RUN);
+	}
+	/* In momentary-stand mode in_stand is a latched flag; clear it so
+	   stand_update() doesn't immediately drive us back toward SLEEP. */
+	if (flash_values.momentary_stand == 1){
+		sensor_values.in_stand = 0;
+	}
+	previous_millis_heating_halted_update = HAL_GetTick();
+}
+
 void buttons_handle(void){
 	if(buttons_take_press(BTN_1)){
-		/* Encoder press: RUN -> HALTED (stop); any standby/sleep/stopped
-		   state -> RUN (wake / start heating). */
-		if (sensor_values.current_state == RUN){
-			change_state(HALTED);
+		/* Encoder click: 3-button mode still starts/stops heating; in the
+		   normal layout it selects the graph / gauge view instead. */
+		if (flash_values.three_button_mode == 1){
+			buttons_toggle_heating();
 		}
-		else{   /* PRESTANDBY, STANDBY, SLEEP, EMERGENCY_SLEEP, HALTED */
-			change_state(RUN);
+		else{
+			display_app_toggle_view();
 		}
-		/* In momentary-stand mode in_stand is a latched flag; clear it so
-		   stand_update() doesn't immediately drive us back toward SLEEP. */
-		if (flash_values.momentary_stand == 1){
-			sensor_values.in_stand = 0;
-		}
-		previous_millis_heating_halted_update = HAL_GetTick();
 	}
 
 	if(buttons_take_long_press(BTN_1)){
@@ -98,7 +108,7 @@ void buttons_handle(void){
 		settings_menu();
 	}
 
-	/* Set "set temp" to preset temp 1 */
+	/* Preset 1: short press starts/stops the iron, long press saves preset 1 */
 	if(buttons_take_press(BTN_2)){
 		if(settings_menu_active == 1){
 			encoder_add(+2);
@@ -107,8 +117,8 @@ void buttons_handle(void){
 			encoder_add(+5);
 		}
 		else{
-			/* Toggle between the graph view and the gauge dashboard. */
-			display_app_toggle_view();
+			/* BTN_2 now starts/stops the iron (was the encoder click). */
+			buttons_toggle_heating();
 		}
 	}
 	if(buttons_take_long_press(BTN_2)){
