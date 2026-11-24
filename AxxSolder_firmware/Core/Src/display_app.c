@@ -179,16 +179,6 @@ void display_app_graph_invalidate(void)
     graph_readout_valid = 0;
 }
 
-/* Degree ring + unit letter (the 17x18/12x15 faces have no '°'). */
-static void readout_deg_c(int x, int y, int r, int dx, char letter,
-                          UG_FONT *f, uint16_t color)
-{
-    char b[2] = { letter, 0 };
-
-    UG_DrawCircle(x + r, y + r + 1, r, color);
-    LCD_PutStr((uint16_t)(x + dx), (uint16_t)y, b, f, color, C_Background);
-}
-
 /* Supply power budget: the USB-PD contract when present, otherwise the
  * configured DC budget. Used by the Pwr readout and the gauge scale. */
 static int supply_power_w(void)
@@ -299,17 +289,16 @@ static void update_graph_display(void)
     /* Selected temperature, centred under the big readout. */
     if (!graph_readout_valid || (graph_readout.set_temp != set_temp)) {
         char text[24];
-        const int group_w = 109;          /* "Sel. %3d " + degree + 'C' */
+        const int group_w = 85;          /* "Sel. %3d" in 20x23 */
         int x = (L->div_x - group_w) / 2;
 
         if (x < L->big_x) {
             x = L->big_x;
         }
-        UG_FillFrame(L->big_x, (uint16_t)(L->sel_y - 2),
-                     (uint16_t)(L->div_x - 6), (uint16_t)(L->sel_y + 18), C_Background);
-        (void)snprintf(text, sizeof(text), "Sel. %3d ", set_temp);
-        LCD_PutStr((uint16_t)x, L->sel_y, text, FONT_arial_20X23, C_JbcGray, C_Background);
-        readout_deg_c(x + 93, L->sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
+        UG_FillFrame((uint16_t)x, (uint16_t)(L->sel_y - 2),
+                     (uint16_t)(x + group_w), (uint16_t)(L->sel_y + 23), C_Background);
+        (void)snprintf(text, sizeof(text), "Sel. %3d", set_temp);
+        LCD_PutStr((uint16_t)x, L->sel_y, text, FONT_arial_20X23, C_JbcGrayLight, C_Background);
 
         graph_readout.set_temp = (int16_t)set_temp;
     }
@@ -323,7 +312,7 @@ static void update_graph_display(void)
                 (memcmp(graph_readout.info[i], info[i], sizeof(info[i])) != 0)) {
                 UG_FillFrame(L->info_value_x, y,
                              (uint16_t)((((flash_values.screen_rotation == 0) || (flash_values.screen_rotation == 2)) ? 240 : 320) - 6),
-                             (uint16_t)(y + 18), C_Background);
+                             (uint16_t)(y + 23), C_Background);
                 LCD_PutStr(L->info_value_x, y, info[i],
                            FONT_arial_20X23, C_Text, C_Background);
             }
@@ -350,21 +339,21 @@ typedef struct {
 } alt_layout_t;
 
 static const alt_layout_t alt_portrait = {
-    .big_x = 60, .big_y = 37, .sel_y = 103,
+    .big_x = 51, .big_y = 53, .sel_y = 117,
     .div_x = 120, .div_y = 160,
-    .info_x = 126, .info_value_x = 168, .info_y0 = 180, .info_pitch = 30,
-    .cx = 60, .cy = 300, .r = 50,
+    .info_x = 122, .info_value_x = 172, .info_y0 = 180, .info_pitch = 30,
+    .cx = 60, .cy = 292, .r = 46,
     .title_x = 4, .title_y = 165, .value_y = 195,
-    .s25_x = 2, .s25_y = 304, .s75_x = 87, .s75_y = 304,
+    .s25_x = 2, .s25_y = 294, .s75_x = 78, .s75_y = 294,
 };
 
 static const alt_layout_t alt_landscape = {
-    .big_x = 100, .big_y = 17, .sel_y = 83,
+    .big_x = 91, .big_y = 33, .sel_y = 93,
     .div_x = 160, .div_y = 120,
-    .info_x = 170, .info_value_x = 208, .info_y0 = 140, .info_pitch = 30,
+    .info_x = 166, .info_value_x = 214, .info_y0 = 140, .info_pitch = 30,
     .cx = 80, .cy = 225, .r = 48,
     .title_x = 4, .title_y = 125, .value_y = 148,
-    .s25_x = 2, .s25_y = 190, .s75_x = 127, .s75_y = 190,
+    .s25_x = 2, .s25_y = 190, .s75_x = 118, .s75_y = 190,
 };
 
 static alt_layout_t alt;
@@ -406,7 +395,7 @@ static void alt_draw_static(void)
     for (uint8_t i = 0; i < 3; i++) {
         uint16_t y = (uint16_t)(alt.info_y0 + (i * alt.info_pitch));
 
-        LCD_PutStr(alt.info_x, y, (char *)names[i], FONT_arial_17X18, C_Text, C_Background);
+        LCD_PutStr(alt.info_x, y, (char *)names[i], FONT_arial_20X23, C_Text, C_Background);
         if (i) {
             draw_dashed_line_fillframe(alt.info_x, (int16_t)(y - 5), (int16_t)(sw - 6),
                                        (int16_t)(y - 5), C_JbcGrid, 2, 2, 1);
@@ -490,16 +479,14 @@ static void alt_update_display(void)
 
     /* Selected temperature, right-aligned under the big number. */
     if (!graph_readout_valid || (graph_readout.set_temp != set_temp)) {
-        const int text_w = 93;               /* "Sel. %3d " in 20x23 */
-        const int group_w = text_w + 16;     /* + degree ring and 'C' */
+        const int group_w = 85;              /* "Sel. %3d" in 20x23 */
         const int x = sw - 6 - group_w;
         char text[32];
 
         UG_FillFrame((uint16_t)x, (uint16_t)(alt.sel_y - 2),
-                     (uint16_t)(x + group_w), (uint16_t)(alt.sel_y + 20), C_Background);
-        (void)snprintf(text, sizeof(text), "Sel. %3d ", set_temp);
-        LCD_PutStr((uint16_t)x, alt.sel_y, text, FONT_arial_20X23, C_JbcGray, C_Background);
-        readout_deg_c(x + text_w, alt.sel_y + 2, 2, 6, unit, FONT_arial_12X15, C_JbcGray);
+                     (uint16_t)(x + group_w), (uint16_t)(alt.sel_y + 23), C_Background);
+        (void)snprintf(text, sizeof(text), "Sel. %3d", set_temp);
+        LCD_PutStr((uint16_t)x, alt.sel_y, text, FONT_arial_20X23, C_JbcGrayLight, C_Background);
         graph_readout.set_temp = (int16_t)set_temp;
     }
 
@@ -511,8 +498,8 @@ static void alt_update_display(void)
             if (!graph_readout_valid ||
                 (memcmp(graph_readout.info[i], info[i], sizeof(info[i])) != 0)) {
                 UG_FillFrame(alt.info_value_x, y, (uint16_t)(sw - 6),
-                             (uint16_t)(y + 14), C_Background);
-                LCD_PutStr(alt.info_value_x, y, info[i], FONT_arial_17X18, C_Text, C_Background);
+                             (uint16_t)(y + 23), C_Background);
+                LCD_PutStr(alt.info_value_x, y, info[i], FONT_arial_20X23, C_Text, C_Background);
             }
         }
         memcpy(graph_readout.info, info, sizeof(info));
@@ -603,14 +590,14 @@ static void alt_draw_gauge_static(int max_w)
     v = (max_w * 25 + 50) / 100;
     (void)snprintf(b, sizeof(b), "%dW", v);
     UG_FillFrame((uint16_t)(alt.s25_x - 1), (uint16_t)(alt.s25_y - 1),
-                 (uint16_t)(alt.s25_x + 32), (uint16_t)(alt.s25_y + 14), C_Background);
-    LCD_PutStr(alt.s25_x, alt.s25_y, b, FONT_arial_12X15, C_Text, C_Background);
+                 (uint16_t)(alt.s25_x + 41), (uint16_t)(alt.s25_y + 18), C_Background);
+    LCD_PutStr(alt.s25_x, alt.s25_y, b, FONT_arial_17X18, C_Text, C_Background);
 
     v = (max_w * 75 + 50) / 100;
     (void)snprintf(b, sizeof(b), "%dW", v);
     UG_FillFrame((uint16_t)(alt.s75_x - 1), (uint16_t)(alt.s75_y - 1),
-                 (uint16_t)(alt.s75_x + 32), (uint16_t)(alt.s75_y + 14), C_Background);
-    LCD_PutStr(alt.s75_x, alt.s75_y, b, FONT_arial_12X15, C_Text, C_Background);
+                 (uint16_t)(alt.s75_x + 41), (uint16_t)(alt.s75_y + 18), C_Background);
+    LCD_PutStr(alt.s75_x, alt.s75_y, b, FONT_arial_17X18, C_Text, C_Background);
 
     for (int deg = 0; deg <= 180; deg++) {
         int px = (int)alt.cx + ((int)alt.r * gauge_cos(deg)) / 255;
@@ -678,6 +665,7 @@ static void alt_draw_needle(int watt)
         if (b0y < (int)alt.div_y + 1) b0y = (int)alt.div_y + 1;
         if (b1x > (int)alt.div_x - 1) b1x = (int)alt.div_x - 1;
         if (b1y > (int)sh - 1) b1y = (int)sh - 1;
+        if (b1y > (int)alt.cy + 1) b1y = (int)alt.cy + 1;
 
         UG_FillFrame((uint16_t)b0x, (uint16_t)b0y, (uint16_t)b1x, (uint16_t)b1y, C_Background);
 

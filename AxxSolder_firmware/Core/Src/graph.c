@@ -32,21 +32,21 @@ uint8_t initialized = 0;
 static const graph_layout_t layout_portrait = {
     .x0 = 40, .y0 = 12, .w = 156, .h = 180,
     .rule_y = 230, .div_x = 130,
-    .big_x = 8, .big_y = 238,
-    .ring_x = 110, .ring_y = 244,
-    .c_x = 116, .c_y = 238,
-    .sel_y = 286,
-    .info_x = 132, .info_value_x = 174, .info_y0 = 236, .info_pitch = 24,
+    .big_x = 6, .big_y = 250,
+    .ring_x = 110, .ring_y = 256,
+    .c_x = 114, .c_y = 250,
+    .sel_y = 297,
+    .info_x = 132, .info_value_x = 178, .info_y0 = 236, .info_pitch = 24,
 };
 
 /* 320x240: same elements squeezed into the shorter axis. */
 static const graph_layout_t layout_landscape = {
     .x0 = 40, .y0 = 8, .w = 240, .h = 124,
     .rule_y = 154, .div_x = 140,
-    .big_x = 10, .big_y = 160,
-    .ring_x = 112, .ring_y = 166,
-    .c_x = 118, .c_y = 160,
-    .sel_y = 208,
+    .big_x = 11, .big_y = 170,
+    .ring_x = 115, .ring_y = 176,
+    .c_x = 119, .c_y = 170,
+    .sel_y = 217,
     .info_x = 150, .info_value_x = 205, .info_y0 = 160, .info_pitch = 24,
 };
 
@@ -299,10 +299,10 @@ static void graph_draw_static(void)
     draw_axis_labels();
 
     /* units + time base in the strip below the data area */
-    LCD_PutStr(x0 - 4 - 12, y0 + h + 4, "W", FONT_arial_12X15, C_Text, C_Background);
-    deg_c(x0 + w + 4, y0 + h + 4, 2, 6, unit, FONT_arial_12X15, C_JbcRed);
-    LCD_PutStr((uint16_t)(x0 + w - 58), (uint16_t)(y0 + h + 4),
-               (char *)graph_tb_label(), FONT_arial_12X15, C_Text, C_Background);
+    LCD_PutStr(x0 - 4 - 17, y0 + h + 4, "W", FONT_arial_17X18, C_Text, C_Background);
+    deg_c(x0 + w + 4, y0 + h + 4, 2, 6, unit, FONT_arial_17X18, C_JbcRed);
+    LCD_PutStr((uint16_t)(x0 + w - 70), (uint16_t)(y0 + h + 4),
+               (char *)graph_tb_label(), FONT_arial_17X18, C_Text, C_Background);
 
     /* readout pane */
     UG_DrawLine(0, graph_layout.rule_y, sw - 1, graph_layout.rule_y, C_Text);

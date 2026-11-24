@@ -21,6 +21,7 @@
 #define C_JbcRed           0xE000   /* right axis + power trace (JBC UI)  */
 #define C_JbcGrid          0x8410   /* neutral grey grid                  */
 #define C_JbcGray          0xA514   /* secondary text (Sel. ...)          */
+#define C_JbcGrayLight     0xBDF7   /* lighter secondary text (Sel. ...)  */
 #define C_TempActive       0x559A   /* active tip temperature: 85,176,215 */
 
 #endif /* __APP_COLORS_H */
